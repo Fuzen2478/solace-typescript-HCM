@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Redis만 사용하는 버전
+  redis:
+    image: redis:7-alpine
+    container_name: hcm-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hcm-network
+
+  # HR Resource Service (Neo4j 없이)
+  hr-resource:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: hr-resource
+    container_name: hcm-hr-resource
+    ports:
+      - '3001:3001'
+      - '3007:3007'
+    environment:
+      - NODE_ENV=development
+      - HR_SERVICE_PORT=3001
+      - WS_PORT=3007
+      - MOCK_LDAP_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Neo4j 환경변수 제거
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - hcm-network
+
+volumes:
+  redis_data:
+    name: hcm_redis_data
+
+networks:
+  hcm-network:
+    name: hcm-network
+    driver: bridge

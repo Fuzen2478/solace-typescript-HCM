@@ -1,108 +1,177 @@
-# https://solace.com/products/event-broker/software/getting-started/
-
 services:
-  # 1) Hyperledger Fabric
-  ca.org1.example.com:
-    image: hyperledger/fabric-ca:1.5
-    environment:
-      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
-      - FABRIC_CA_SERVER_TLS_ENABLED=false
-    ports:
-      - "7054:7054"
-    volumes:
-      - ./fabric/ca/org1/:/etc/hyperledger/fabric-ca-server
-    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
-
-  orderer.example.com:
-    image: hyperledger/fabric-orderer:latest
-    environment:
-      - ORDERER_GENERAL_LOGLEVEL=INFO
-      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
-      - ORDERER_GENERAL_GENESISMETHOD=file
-      - ORDERER_GENERAL_GENESISFILE=/etc/hyperledger/configtx/genesis.block
-      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
-      - ORDERER_GENERAL_LOCALMSPDIR=/etc/hyperledger/msp/orderer/msp
-      - ORDERER_GENERAL_TLS_ENABLED=false
-    working_dir: /opt/gopath/src/github.com/hyperledger/fabric
-    command: orderer
-    ports:
-      - "7050:7050"
-    volumes:
-      - ./fabric:/etc/hyperledger/configtx
-      - ./fabric/msp/orderer-org1:/etc/hyperledger/msp/orderer/msp
-
-  peer0.org1.example.com:
-    image: hyperledger/fabric-peer:latest
-    environment:
-      - CORE_PEER_ID=peer0.org1.example.com
-      - CORE_PEER_LOCALMSPID=Org1MSP
-      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/msp/peer/msp
-      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
-      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051
-      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
-      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.example.com:7052
-      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
-      - CORE_PEER_TLS_ENABLED=false
-    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
-    command: peer node start
-    ports:
-      - "7051:7051"
-      - "7053:7053"
-    volumes:
-      - ./fabric/msp/peer0-org1:/etc/hyperledger/msp/peer/msp
-      - ./fabric:/etc/hyperledger/configtx
-      - /var/run/:/host/var/run/
-
-  # 2) Graph DB
+  # 1. Neo4j Database
   neo4j:
-    image: neo4j:latest
-    container_name: neo4j
+    image: neo4j:5-community
+    container_name: hcm-neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - '7474:7474'
+      - '7687:7687'
     environment:
-      - NEO4J_AUTH=neo4j/neo4jpassword
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_server_memory_heap_initial__size=256m
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=256m
+      - NEO4J_server_config_strict__validation_enabled=false
+      - NEO4J_server_default__listen__address=0.0.0.0
     volumes:
-      - ./graph-db/docker/data:/data
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - hcm-network
 
-  # 3) OpenLDAP
-  openldap:
-    image: osixia/openldap:latest
-    container_name: openldap
+  # 2. Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: hcm-redis
     ports:
-      - "389:389"
-      - "636:636"
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - hcm-network
+
+  # 3. HR Resource Service
+  hr-resource:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: hr-resource
+    container_name: hcm-hr-resource
+    ports:
+      - '3001:3001'
+      - '3011:3011'
     environment:
-      - LDAP_ORGANISATION="ExampleCorp"
-      - LDAP_DOMAIN="example.com"
-      - LDAP_ADMIN_PASSWORD="adminpassword"
-    volumes:
-      - ./openldap/docker/data:/var/lib/ldap
-      - ./openldap/docker/config:/etc/ldap/slapd.d
+      - NODE_ENV=production
+      - HR_SERVICE_PORT=3001
+      - WS_PORT=3011
+      - MOCK_LDAP_ENABLED=true
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3001/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - hcm-network
 
-  # 4) Solace PubSub Standard
-  pub-sub:
-    image: solace/solace-pubsub-standard:latest
-    container_name: solace-standard
+  # 4. Matching Engine
+  matching-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: matching-engine
+    container_name: hcm-matching-engine
     ports:
-      # configuring the message
-      - '8081:8080'
-      # APIs to connect to the message broker
-      - '55554:55555'
-      - '8008:8008'
-      - '1883:1883'
-      - '8000:8000'
-      - '5672:5672'
+      - '3002:3002'
+      - '3012:3012'
+    environment:
+      - NODE_ENV=production
+      - MATCHING_ENGINE_PORT=3002
+      - MATCHING_WS_PORT=3012
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3002/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+  # 5. API Gateway (수정된 depends_on 조건)
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-gateway
+    container_name: hcm-api-gateway
+    ports:
+      - '3000:3000'
+      - '3010:3010'
+    environment:
+      - NODE_ENV=production
+      - API_GATEWAY_PORT=3000
+      - GATEWAY_WS_PORT=3010
+      - HR_SERVICE_URL=http://hr-resource:3001
+      - MATCHING_ENGINE_URL=http://matching-engine:3002
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+    depends_on:
+      hr-resource:
+        condition: service_started  # service_healthy 대신 service_started 사용
+      matching-engine:
+        condition: service_started  # service_healthy 대신 service_started 사용
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/health || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+  # 6. Portainer
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: hcm-portainer
+    ports:
       - '9000:9000'
-      - '2222:2222'
-    shm_size: '2g'
-    environment:
-      - username_admin_globalaccesslevel=admin
-      - username_admin_password=admin
-      - SOLACE_MGMT_USERNAME=admin
-      - SOLACE_MGMT_PASSWORD=admin
-      - SOLACE_ENABLE_CLI=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+volumes:
+  neo4j_data:
+    name: hcm_neo4j_data
+  redis_data:
+    name: hcm_redis_data
+  portainer_data:
+    name: hcm_portainer_data
 
 networks:
-  default:
-    name: project-network
+  hcm-network:
+    name: hcm-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24

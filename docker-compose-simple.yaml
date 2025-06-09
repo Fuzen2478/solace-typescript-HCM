@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # 1. Neo4j Database (Simple Version)
+  neo4j:
+    image: neo4j:5-community
+    container_name: hcm-neo4j
+    ports:
+      - '7474:7474'
+      - '7687:7687'
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_memory_heap_initial_size=256m
+      - NEO4J_dbms_memory_heap_max_size=512m
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --quiet --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - hcm-network
+
+  # 2. Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: hcm-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hcm-network
+
+  # 3. HR Resource Service
+  hr-resource:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: hr-resource
+    container_name: hcm-hr-resource
+    ports:
+      - '3001:3001'
+      - '3007:3007'
+    environment:
+      - NODE_ENV=production
+      - HR_SERVICE_PORT=3001
+      - WS_PORT=3007
+      - MOCK_LDAP_ENABLED=true
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - hcm-network
+
+  # 4. Portainer (Management)
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: hcm-portainer
+    ports:
+      - '9000:9000'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - hcm-network
+
+volumes:
+  neo4j_data:
+    name: hcm_neo4j_data
+  redis_data:
+    name: hcm_redis_data
+  portainer_data:
+    name: hcm_portainer_data
+
+networks:
+  hcm-network:
+    name: hcm-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24

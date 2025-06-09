@@ -1,0 +1,50 @@
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-07T17:41:48.752Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-07T17:41:48.758Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-07T17:41:48.759Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-07T17:41:48.759Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-07T22:00:57.912Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-07T22:00:57.917Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-07T22:00:57.918Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-07T22:00:57.918Z"}
+{"level":"info","message":"Service hr-resource is back online","timestamp":"2025-06-07T22:01:27.942Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-07T22:01:37.896Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-07T22:01:37.902Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-07T22:01:37.902Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-07T22:01:37.902Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-07T22:01:52.632Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-07T22:01:52.638Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-07T22:01:52.639Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-07T22:01:52.639Z"}
+{"level":"info","message":"Service hr-resource is back online","timestamp":"2025-06-07T22:02:22.658Z"}
+{"level":"warn","message":"Service hr-resource health check failed:","timestamp":"2025-06-07T22:33:53.132Z"}
+{"level":"info","message":"Shutting down API Gateway...","timestamp":"2025-06-07T22:33:53.340Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-08T13:18:43.863Z"}
+{"level":"info","message":"WebSocket server starting on port 3006","timestamp":"2025-06-08T13:18:43.868Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-08T13:18:43.873Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-08T13:18:43.874Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-08T13:18:43.874Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-06-08T13:18:43.878Z"}
+{"level":"info","message":"Shutting down API Gateway...","timestamp":"2025-06-08T13:18:51.016Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-08T13:18:55.769Z"}
+{"level":"info","message":"WebSocket server starting on port 3010","timestamp":"2025-06-08T13:18:55.774Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-08T13:18:55.780Z"}
+{"level":"info","message":"WebSocket monitoring on port 3010","timestamp":"2025-06-08T13:18:55.781Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-08T13:18:55.781Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-06-08T13:18:55.786Z"}
+{"level":"info","message":"Shutting down API Gateway...","timestamp":"2025-06-08T13:18:59.413Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-08T14:37:13.678Z"}
+{"level":"info","message":"WebSocket server starting on port 3006","timestamp":"2025-06-08T14:37:13.684Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-08T14:37:13.689Z"}
+{"level":"info","message":"WebSocket monitoring on port 3006","timestamp":"2025-06-08T14:37:13.690Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-08T14:37:13.690Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-06-08T14:37:13.694Z"}
+{"level":"info","message":"Shutting down API Gateway...","timestamp":"2025-06-08T14:37:17.132Z"}
+{"level":"info","message":"Initialized 4 services in registry","timestamp":"2025-06-08T14:38:35.611Z"}
+{"level":"info","message":"WebSocket server starting on port 3010","timestamp":"2025-06-08T14:38:35.617Z"}
+{"level":"info","message":"API Gateway running on port 3000","timestamp":"2025-06-08T14:38:35.623Z"}
+{"level":"info","message":"WebSocket monitoring on port 3010","timestamp":"2025-06-08T14:38:35.623Z"}
+{"level":"info","message":"Service discovery and health checking started","timestamp":"2025-06-08T14:38:35.624Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-06-08T14:38:35.629Z"}
+{"level":"info","message":"Service hr-resource is back online","timestamp":"2025-06-08T14:39:05.631Z"}
+{"level":"info","message":"Service matching-engine is back online","timestamp":"2025-06-08T14:39:05.635Z"}
+{"level":"info","message":"Shutting down API Gateway...","timestamp":"2025-06-08T14:41:05.553Z"}
