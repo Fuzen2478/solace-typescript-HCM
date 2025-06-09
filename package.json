@@ -13,62 +13,25 @@
     "dev:matching": "nodemon --exec \"npx ts-node --transpile-only\" src/services/matching-engine/index.ts",
     "dev:verification": "nodemon --exec \"npx ts-node --transpile-only\" src/services/verification/index.ts",
     "dev:edge": "nodemon --exec \"npx ts-node --transpile-only\" src/services/edge-agent/index.ts",
-    
-    "dev:ldap": "ts-node development/mock-ldap-server.ts",
     "dev:all": "concurrently \"pnpm dev:gateway\" \"pnpm dev:hr\" \"pnpm dev:matching\" \"pnpm dev:verification\" \"pnpm dev:edge\"",
     
-    "docker:quick": "node docker-quick-start.js",
-    "docker:infra": "docker-compose up -d neo4j redis portainer",
-    "docker:services": "docker-compose up -d --build hr-resource matching-engine verification edge-agent api-gateway",
-    "docker:status": "docker-compose ps",
-    "docker:logs:all": "docker-compose logs -f",
-    "docker:health": "curl -s http://localhost:3000/health && curl -s http://localhost:3001/health && curl -s http://localhost:3002/health && curl -s http://localhost:3005/health && curl -s http://localhost:3004/health",
-    
     "docker:dev": "docker-compose up -d --build",
-    "docker:dev:infra": "docker-compose up -d redis neo4j postgres openldap solace portainer redis-commander ldap-admin",
-    "docker:dev:apps": "docker-compose up -d --build api-gateway hr-resource matching-engine verification edge-agent ldap-server",
-    "docker:dev:all": "docker-compose up -d --build",
-    "docker:dev:minimal": "docker-compose up -d redis neo4j postgres",
-    "docker:dev:testing": "docker-compose --profile testing up -d --build",
-    
-    "env:local": "cp .env.local .env || echo 'No .env.local found'",
-    "env:docker": "cp .env.docker .env",
-    "env:production": "cp .env.production .env || echo 'No .env.production found'",
-    
-    "infra:start": "docker-compose up -d redis neo4j postgres portainer",
-    "infra:stop": "docker-compose stop redis neo4j postgres portainer",
-    "infra:logs": "docker-compose logs -f redis neo4j postgres",
-    
-    "setup": "pnpm infra:start && pnpm wait-for-services",
-    "wait-for-services": "node scripts/wait-for-services.js",
-    "health-check": "powershell -ExecutionPolicy Bypass -File scripts/health-check.ps1",
-    "health-check:bash": "bash scripts/health-check.sh",
-    "test:docker": "powershell -ExecutionPolicy Bypass -File scripts/test-docker-environment.ps1",
-    "test:docker:quick": "powershell -ExecutionPolicy Bypass -File scripts/test-docker-environment.ps1 -TestType quick",
-    "validate:docker": "powershell -ExecutionPolicy Bypass -File scripts/validate-docker-config.ps1",
-    "verify:services": "powershell -ExecutionPolicy Bypass -File scripts/verify-services.ps1",
-    "verify:functional": "powershell -ExecutionPolicy Bypass -File scripts/test-functional.ps1",
-    "analyze:logs": "powershell -ExecutionPolicy Bypass -File scripts/analyze-logs.ps1",
-    "verify:complete": "powershell -ExecutionPolicy Bypass -File scripts/verify-complete-system.ps1",
-    "verify:quick": "powershell -ExecutionPolicy Bypass -File scripts/verify-complete-system.ps1 -TestLevel minimal",
-    "verify:full": "powershell -ExecutionPolicy Bypass -File scripts/verify-complete-system.ps1 -TestLevel comprehensive -GenerateReport",
+    "docker:infra": "docker-compose up -d neo4j redis portainer",
+    "docker:status": "docker-compose ps",
+    "docker:logs": "docker-compose logs -f",
     
     "build": "tsc",
-    "build:docker": "tsc --noEmit false --skipLibCheck true --noImplicitAny false",
     "start": "node dist/index.js",
+    
     "test": "jest",
     "test:integration": "jest tests/integration --testTimeout=60000",
-    "test:integration:manual": "node tests/integration-test.js",
-    "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "demo": "ts-node tests/scenarios/demo.ts",
-    "demo:verbose": "ts-node tests/scenarios/demo.ts --verbose",
     
-    "logs:hr": "tail -f hr-resource.log",
-    "logs:ldap": "tail -f mock-ldap.log",
-    "logs:all": "tail -f *.log",
+    "setup": "node scripts/development/docker-quick-start.js",
+    "health-check": "node scripts/utilities/check-system-status.js",
+    "clean": "rm -rf dist logs/*.log data/*.db",
     
-    "clean": "rm -rf dist *.log data/*.db"
+    "demo": "node scripts/utilities/presentation-demo.js"
   },
   "dependencies": {
     "@types/node": "^22.15.3",

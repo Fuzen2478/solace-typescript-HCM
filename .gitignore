@@ -1,1 +1,42 @@
 node_modules
+
+# 로그 파일들
+*.log
+logs/*.log
+
+# 임시 파일들  
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# 시스템 파일들
+.DS_Store
+Thumbs.db
+
+# 환경별 설정 파일들
+.env.local
+.env.production
+
+# 테스트 데이터
+data/test-*
+data/temp-*
+
+# IDE 파일들
+.vscode/settings.json
+.idea/
+
+# 빌드 아티팩트
+dist/
+build/
+
+# OS 생성 파일들
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# 개발 중 생성되는 임시 파일들
+detail.json
+gateway.json
+*.backup
