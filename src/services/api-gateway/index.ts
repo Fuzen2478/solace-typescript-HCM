@@ -3,35 +3,20 @@ import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import winston from 'winston';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import Redis from 'ioredis';
 import WebSocket from 'ws';
 import axios from 'axios';
 import { EventEmitter } from 'events';
+import CircuitBreaker from '../../shared/circuit-breaker';
+import { AdvancedLogger, createLoggingMiddleware, PerformanceTimer } from '../../shared/advanced-logger';
 
 dotenv.config();
 
-// Logger setup
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new winston.transports.File({ filename: 'api-gateway.log' }),
-    new winston.transports.File({ filename: 'api-gateway-error.log', level: 'error' })
-  ]
-});
+// Advanced logger setup
+const advancedLogger = new AdvancedLogger('api-gateway', '1.0.0');
+const logger = advancedLogger.getLogger(); // For backwards compatibility
 
 // Event emitter for service coordination
 const orchestrationEvents = new EventEmitter();
@@ -58,6 +43,9 @@ app.use(limiter);
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Advanced logging middleware
+app.use(createLoggingMiddleware(advancedLogger));
 
 // Redis for caching and session management
 let redis: any;
@@ -133,6 +121,7 @@ interface ServiceConfig {
   lastCheck: Date;
   version: string;
   capabilities: string[];
+  circuitBreaker?: CircuitBreaker;
 }
 
 class ServiceRegistry {
@@ -182,7 +171,8 @@ class ServiceRegistry {
       this.services.set(service.name, {
         ...service,
         status: 'unknown',
-        lastCheck: new Date()
+        lastCheck: new Date(),
+        circuitBreaker: new CircuitBreaker(5, 60000) // 5 failures, 60s timeout
       });
     });
 
@@ -191,33 +181,62 @@ class ServiceRegistry {
 
   private async performHealthChecks() {
     for (const [serviceName, config] of this.services.entries()) {
-      try {
-        const response = await axios.get(`${config.url}${config.health}`, {
-          timeout: 5000
-        });
-        
-        this.services.set(serviceName, {
-          ...config,
-          status: response.status === 200 ? 'healthy' : 'unhealthy',
-          lastCheck: new Date()
-        });
+      const timer = new PerformanceTimer(advancedLogger, `health_check_${serviceName}`);
+      
+      if (config.circuitBreaker) {
+        try {
+          await config.circuitBreaker.execute(
+            async () => {
+              const response = await axios.get(`${config.url}${config.health}`, {
+                timeout: 5000
+              });
+              
+              if (response.status !== 200) {
+                throw new Error(`Health check failed with status ${response.status}`);
+              }
+              
+              return response;
+            },
+            async () => {
+              advancedLogger.logSecurity('circuit_breaker_fallback', {
+                service: serviceName,
+                state: config.circuitBreaker?.getState()
+              });
+              throw new Error('Circuit breaker is open');
+            }
+          );
+          
+          // Success
+          this.services.set(serviceName, {
+            ...config,
+            status: 'healthy',
+            lastCheck: new Date()
+          });
 
-        if (config.status !== 'healthy' && response.status === 200) {
-          logger.info(`Service ${serviceName} is back online`);
-          orchestrationEvents.emit('service_recovered', { serviceName, config });
-        }
-      } catch (error) {
-        this.services.set(serviceName, {
-          ...config,
-          status: 'unhealthy',
-          lastCheck: new Date()
-        });
+          if (config.status !== 'healthy') {
+            advancedLogger.logBusinessEvent('service_recovered', { serviceName });
+            orchestrationEvents.emit('service_recovered', { serviceName, config });
+          }
+          
+        } catch (error: any) {
+          this.services.set(serviceName, {
+            ...config,
+            status: 'unhealthy',
+            lastCheck: new Date()
+          });
 
-        if (config.status === 'healthy') {
-          logger.warn(`Service ${serviceName} health check failed:`, error.message);
-          orchestrationEvents.emit('service_failed', { serviceName, config, error });
+          if (config.status === 'healthy') {
+            advancedLogger.logError(error, { 
+              context: 'health_check',
+              service: serviceName,
+              circuitBreakerState: config.circuitBreaker.getState()
+            });
+            orchestrationEvents.emit('service_failed', { serviceName, config, error });
+          }
         }
       }
+      
+      timer.end({ service: serviceName });
     }
   }
 
@@ -512,48 +531,110 @@ const routeToService = (serviceName: string) => {
     }
 
     req.serviceUrl = service.url;
+    req.serviceName = serviceName;
     next();
   };
 };
 
-// Proxy middleware
+// Proxy middleware with Circuit Breaker
 const proxyToService = async (req: express.Request, res: express.Response) => {
+  const timer = new PerformanceTimer(advancedLogger, 'proxy_request');
+  const serviceName = req.serviceName;
+  const service = serviceRegistry.getService(serviceName!);
+  
+  if (!service?.circuitBreaker) {
+    timer.end({ error: 'no_circuit_breaker' });
+    return res.status(500).json({ error: 'Service configuration error' });
+  }
+
   try {
-    const targetUrl = `${req.serviceUrl}${req.path}`;
-    const method = req.method.toLowerCase();
-    
-    const config: any = {
-      method,
-      url: targetUrl,
-      timeout: 30000,
-      headers: {
-        ...req.headers,
-        'x-forwarded-for': req.ip,
-        'x-forwarded-proto': req.protocol,
-        'x-request-id': uuidv4()
+    const result = await service.circuitBreaker.execute(
+      async () => {
+        const targetUrl = `${req.serviceUrl}${req.path}`;
+        const method = req.method.toLowerCase();
+        
+        const config: any = {
+          method,
+          url: targetUrl,
+          timeout: 30000,
+          headers: {
+            ...req.headers,
+            'x-forwarded-for': req.ip,
+            'x-forwarded-proto': req.protocol,
+            'x-request-id': req.correlationId || uuidv4()
+          }
+        };
+
+        if (['post', 'put', 'patch'].includes(method)) {
+          config.data = req.body;
+        }
+
+        if (req.query && Object.keys(req.query).length > 0) {
+          config.params = req.query;
+        }
+
+        advancedLogger.logExternalAPI(serviceName!, `${method.toUpperCase()} ${req.path}`, 0, 0, {
+          correlationId: req.correlationId
+        });
+
+        const response = await axios(config);
+        
+        const duration = timer.end({ 
+          service: serviceName,
+          method: method.toUpperCase(),
+          path: req.path,
+          statusCode: response.status
+        });
+        
+        advancedLogger.logExternalAPI(serviceName!, `${method.toUpperCase()} ${req.path}`, duration, response.status, {
+          correlationId: req.correlationId,
+          success: true
+        });
+
+        return response;
+      },
+      async () => {
+        // Fallback: Return cached response or error
+        advancedLogger.logSecurity('circuit_breaker_activated', {
+          service: serviceName,
+          path: req.path,
+          method: req.method,
+          circuitBreakerState: service.circuitBreaker?.getState()
+        });
+        
+        // Try to get cached response
+        const cacheKey = `fallback:${serviceName}:${req.method}:${req.path}`;
+        const cachedResponse = await redis.get(cacheKey);
+        
+        if (cachedResponse) {
+          return { status: 200, data: JSON.parse(cachedResponse) };
+        }
+        
+        throw new Error('Service temporarily unavailable - circuit breaker open');
       }
-    };
+    );
 
-    if (['post', 'put', 'patch'].includes(method)) {
-      config.data = req.body;
-    }
-
-    if (req.query && Object.keys(req.query).length > 0) {
-      config.params = req.query;
-    }
-
-    const response = await axios(config);
-    res.status(response.status).json(response.data);
+    res.status(result.status).json(result.data);
 
   } catch (error: any) {
-    logger.error('Proxy error:', error.message);
+    const duration = timer.end({ error: error.message });
+    
+    advancedLogger.logError(error, {
+      context: 'proxy_request',
+      service: serviceName,
+      method: req.method,
+      path: req.path,
+      correlationId: req.correlationId,
+      circuitBreakerState: service.circuitBreaker.getState()
+    });
     
     if (error.response) {
       res.status(error.response.status).json(error.response.data);
     } else if (error.code === 'ECONNREFUSED') {
       res.status(503).json({ 
         error: 'Service temporarily unavailable',
-        timestamp: new Date()
+        timestamp: new Date(),
+        circuitBreaker: service.circuitBreaker.getState()
       });
     } else {
       res.status(500).json({ 
@@ -569,6 +650,8 @@ declare global {
   namespace Express {
     interface Request {
       serviceUrl?: string;
+      serviceName?: string;
+      correlationId?: string;
     }
   }
 }

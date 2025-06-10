@@ -27,10 +27,15 @@ CMD ["npx", "ts-node", "--transpile-only", "src/services/api-gateway/index.ts"]
 
 # Verification Service
 FROM base AS verification
-EXPOSE 3005
+EXPOSE 3003
 CMD ["npx", "ts-node", "--transpile-only", "src/services/verification/index.ts"]
 
 # Edge Agent Service
 FROM base AS edge-agent
-EXPOSE 3004 3008
+EXPOSE 3004 3005
 CMD ["npx", "ts-node", "--transpile-only", "src/services/edge-agent/index.ts"]
+
+# Outsourcing Service
+FROM base AS outsourcing
+EXPOSE 3006
+CMD ["npx", "ts-node", "--transpile-only", "src/services/outsourcing/index.ts"]

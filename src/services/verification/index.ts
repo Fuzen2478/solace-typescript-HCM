@@ -827,7 +827,7 @@ const initializeServices = async () => {
 };
 
 // Start server
-const PORT = process.env.VERIFICATION_SERVICE_PORT || 3005;
+const PORT = process.env.VERIFICATION_SERVICE_PORT || 3003;
 app.listen(PORT, async () => {
   logger.info(`Verification Service running on port ${PORT}`);
   

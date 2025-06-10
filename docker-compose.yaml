@@ -77,7 +77,93 @@ services:
     networks:
       - hcm-network
 
-  # 4. Matching Engine
+  # 4. Verification Service
+  verification:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: verification
+    container_name: hcm-verification
+    ports:
+      - '3003:3003'
+    environment:
+      - NODE_ENV=production
+      - VERIFICATION_SERVICE_PORT=3003
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VERIFICATION_SECRET=hcm-verification-secret-key
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3003/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+  # 5. Edge Agent
+  edge-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: edge-agent
+    container_name: hcm-edge-agent
+    ports:
+      - '3004:3004'
+      - '3005:3005'
+    environment:
+      - NODE_ENV=production
+      - EDGE_AGENT_PORT=3004
+      - EDGE_WS_PORT=3005
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CLUSTER_NAME=hcm-cluster
+      - AGENT_ID=edge-agent-main
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3004/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+  # 6. Outsourcing Service
+  outsourcing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: outsourcing
+    container_name: hcm-outsourcing
+    ports:
+      - '3006:3006'
+    environment:
+      - NODE_ENV=production
+      - OUTSOURCING_SERVICE_PORT=3006
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3006/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - hcm-network
+
+  # 7. Matching Engine
   matching-engine:
     build:
       context: .

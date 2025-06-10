@@ -31,7 +31,10 @@
     "health-check": "node scripts/utilities/check-system-status.js",
     "clean": "rm -rf dist logs/*.log data/*.db",
     
-    "demo": "node scripts/utilities/presentation-demo.js"
+    "demo": "node scripts/utilities/comprehensive-demo.js",
+    "demo:auto": "node -e \"const demo = require('./scripts/utilities/comprehensive-demo.js'); const CONFIG = require('./scripts/utilities/comprehensive-demo.js').CONFIG; CONFIG.demo.autoAdvance = true; new demo().runDemo();\"",
+    "test:performance": "node scripts/testing/performance-test.js",
+    "dev:outsourcing": "nodemon --exec \"npx ts-node --transpile-only\" src/services/outsourcing/index.ts"
   },
   "dependencies": {
     "@types/node": "^22.15.3",
