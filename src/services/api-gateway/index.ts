@@ -1,16 +1,20 @@
-import express from 'express';
-import cors from 'cors';
+import { EventEmitter } from 'events';
+import axios from 'axios';
 import compression from 'compression';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
-import { v4 as uuidv4 } from 'uuid';
 import Redis from 'ioredis';
+import { v4 as uuidv4 } from 'uuid';
 import WebSocket from 'ws';
-import axios from 'axios';
-import { EventEmitter } from 'events';
+import {
+  AdvancedLogger,
+  createLoggingMiddleware,
+  PerformanceTimer,
+} from '../../shared/advanced-logger';
 import CircuitBreaker from '../../shared/circuit-breaker';
-import { AdvancedLogger, createLoggingMiddleware, PerformanceTimer } from '../../shared/advanced-logger';
 
 dotenv.config();
 
@@ -26,16 +30,20 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+      'http://localhost:3000',
+    ],
+    credentials: true,
+  }),
+);
 
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // limit each IP to 1000 requests per windowMs
-  message: 'Too many requests from this IP, please try again later'
+  message: 'Too many requests from this IP, please try again later',
 });
 app.use(limiter);
 
@@ -57,13 +65,13 @@ try {
     maxRetriesPerRequest: 3,
     lazyConnect: true,
     connectTimeout: 5000,
-    commandTimeout: 5000
+    commandTimeout: 5000,
   });
-  
+
   redis.on('connect', () => {
     logger.info('Redis connected successfully');
   });
-  
+
   redis.on('error', (error) => {
     logger.warn('Redis connection error:', error.message);
     logger.warn('Switching to Mock Redis mode');
@@ -72,12 +80,13 @@ try {
   // Test connection with timeout
   Promise.race([
     redis.ping(),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Redis timeout')), 3000))
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Redis timeout')), 3000),
+    ),
   ]).catch(() => {
     logger.warn('Redis connection failed, using Mock Redis');
     redis = createMockRedis();
   });
-
 } catch (error) {
   logger.error('Redis initialization failed:', error);
   redis = createMockRedis();
@@ -108,7 +117,7 @@ function createMockRedis() {
       return Promise.resolve('PONG');
     },
     on: () => {}, // Empty event handler
-    off: () => {} // Empty event handler
+    off: () => {}, // Empty event handler
   };
 }
 
@@ -139,40 +148,44 @@ class ServiceRegistry {
     const services = [
       {
         name: 'hr-resource',
-        url: process.env.HR_SERVICE_URL || 'http://localhost:3001',
+        url: 'http://host.docker.internal:3001',
         health: '/health',
         version: '1.0.0',
-        capabilities: ['employee-management', 'skills-analysis', 'org-hierarchy']
+        capabilities: [
+          'employee-management',
+          'skills-analysis',
+          'org-hierarchy',
+        ],
       },
       {
         name: 'matching-engine',
-        url: process.env.MATCHING_ENGINE_URL || 'http://localhost:3002',
+        url: 'http://host.docker.internal:3002',
         health: '/health',
         version: '1.0.0',
-        capabilities: ['task-matching', 'analytics', 'recommendations']
+        capabilities: ['task-matching', 'analytics', 'recommendations'],
       },
       {
         name: 'verification',
-        url: process.env.VERIFICATION_SERVICE_URL || 'http://localhost:3003',
+        url: 'http://host.docker.internal:3003',
         health: '/health',
         version: '1.0.0',
-        capabilities: ['certification-verification', 'work-history']
+        capabilities: ['certification-verification', 'work-history'],
       },
       {
         name: 'edge-agent',
-        url: process.env.EDGE_AGENT_URL || 'http://localhost:3004',
+        url: 'http://host.docker.internal:3004',
         health: '/health',
         version: '1.0.0',
-        capabilities: ['distributed-tasks', 'failure-detection', 'state-sync']
-      }
+        capabilities: ['distributed-tasks', 'failure-detection', 'state-sync'],
+      },
     ];
 
-    services.forEach(service => {
+    services.forEach((service) => {
       this.services.set(service.name, {
         ...service,
         status: 'unknown',
         lastCheck: new Date(),
-        circuitBreaker: new CircuitBreaker(5, 60000) // 5 failures, 60s timeout
+        circuitBreaker: new CircuitBreaker(5, 60000), // 5 failures, 60s timeout
       });
     });
 
@@ -181,61 +194,77 @@ class ServiceRegistry {
 
   private async performHealthChecks() {
     for (const [serviceName, config] of this.services.entries()) {
-      const timer = new PerformanceTimer(advancedLogger, `health_check_${serviceName}`);
-      
+      const timer = new PerformanceTimer(
+        advancedLogger,
+        `health_check_${serviceName}`,
+      );
+
       if (config.circuitBreaker) {
         try {
           await config.circuitBreaker.execute(
             async () => {
-              const response = await axios.get(`${config.url}${config.health}`, {
-                timeout: 5000
-              });
-              
+              const response = await axios.get(
+                `${config.url}${config.health}`,
+                {
+                  timeout: 5000,
+                },
+              );
+
               if (response.status !== 200) {
-                throw new Error(`Health check failed with status ${response.status}`);
+                throw new Error(
+                  `Health check failed with status ${response.status}`,
+                );
               }
-              
+
               return response;
             },
             async () => {
               advancedLogger.logSecurity('circuit_breaker_fallback', {
                 service: serviceName,
-                state: config.circuitBreaker?.getState()
+                state: config.circuitBreaker?.getState(),
               });
               throw new Error('Circuit breaker is open');
-            }
+            },
           );
-          
+
           // Success
           this.services.set(serviceName, {
             ...config,
             status: 'healthy',
-            lastCheck: new Date()
+            lastCheck: new Date(),
           });
 
           if (config.status !== 'healthy') {
-            advancedLogger.logBusinessEvent('service_recovered', { serviceName });
-            orchestrationEvents.emit('service_recovered', { serviceName, config });
+            advancedLogger.logBusinessEvent('service_recovered', {
+              serviceName,
+            });
+            orchestrationEvents.emit('service_recovered', {
+              serviceName,
+              config,
+            });
           }
-          
         } catch (error: any) {
           this.services.set(serviceName, {
             ...config,
             status: 'unhealthy',
-            lastCheck: new Date()
+            lastCheck: new Date(),
           });
 
           if (config.status === 'healthy') {
-            advancedLogger.logError(error, { 
+            advancedLogger.logError(error, {
               context: 'health_check',
               service: serviceName,
-              circuitBreakerState: config.circuitBreaker.getState()
+              circuitBreakerState: config.circuitBreaker.getState(),
             });
-            orchestrationEvents.emit('service_failed', { serviceName, config, error });
+            orchestrationEvents.emit('service_failed', {
+              serviceName,
+              config,
+              error,
+            });
           }
         }
       }
-      
+
       timer.end({ service: serviceName });
     }
   }
@@ -245,7 +274,9 @@ class ServiceRegistry {
   }
 
   getHealthyServices(): ServiceConfig[] {
-    return Array.from(this.services.values()).filter(s => s.status === 'healthy');
+    return Array.from(this.services.values()).filter(
+      (s) => s.status === 'healthy',
+    );
   }
 
   getAllServices(): ServiceConfig[] {
@@ -286,7 +317,10 @@ class WorkflowOrchestrator {
         throw new Error('HR Resource service is not available');
       }
 
-      const employeeResponse = await axios.post(`${hrService.url}/employees`, employeeData);
+      const employeeResponse = await axios.post(
+        `${hrService.url}/employees`,
+        employeeData,
+      );
       results.employee = employeeResponse.data;
       logger.info(`Employee created: ${results.employee.id}`);
 
@@ -295,31 +329,35 @@ class WorkflowOrchestrator {
       if (edgeService && edgeService.status === 'healthy') {
         await axios.post(`${edgeService.url}/agents/initialize`, {
           employeeId: results.employee.id,
-          capabilities: employeeData.skills?.map((s: any) => s.name) || []
+          capabilities: employeeData.skills?.map((s: any) => s.name) || [],
         });
         results.edgeAgentInitialized = true;
       }
 
       // Step 3: Generate initial task recommendations
-      const matchingService = this.serviceRegistry.getService('matching-engine');
+      const matchingService =
+        this.serviceRegistry.getService('matching-engine');
       if (matchingService && matchingService.status === 'healthy') {
         const recommendationsResponse = await axios.get(
-          `${matchingService.url}/employees/${results.employee.id}/recommendations`
+          `${matchingService.url}/employees/${results.employee.id}/recommendations`,
         );
         results.initialRecommendations = recommendationsResponse.data;
       }
 
       // Step 4: Cache onboarding result
-      await redis.setex(`onboarding:${workflowId}`, 3600, JSON.stringify(results));
+      await redis.setex(
+        `onboarding:${workflowId}`,
+        3600,
+        JSON.stringify(results),
+      );
 
       logger.info(`Employee onboarding workflow completed: ${workflowId}`);
       return {
         workflowId,
         status: 'completed',
         results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-
     } catch (error) {
       logger.error(`Employee onboarding workflow failed: ${workflowId}`, error);
       return {
@@ -327,7 +365,7 @@ class WorkflowOrchestrator {
         status: 'failed',
         error: error.message,
         partialResults: results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     }
   }
@@ -341,29 +379,39 @@ class WorkflowOrchestrator {
       logger.info(`Starting task assignment workflow: ${workflowId}`);
 
       // Step 1: Find optimal matches
-      const matchingService = this.serviceRegistry.getService('matching-engine');
+      const matchingService =
+        this.serviceRegistry.getService('matching-engine');
       if (!matchingService || matchingService.status !== 'healthy') {
         throw new Error('Matching Engine service is not available');
       }
 
       // Create task first
-      const taskResponse = await axios.post(`${matchingService.url}/tasks`, taskData);
+      const taskResponse = await axios.post(
+        `${matchingService.url}/tasks`,
+        taskData,
+      );
       results.task = taskResponse.data;
 
       // Find matches
-      const matchesResponse = await axios.post(`${matchingService.url}/tasks/${results.task.id}/matches`, {
-        maxResults: 5,
-        includeRisks: true
-      });
+      const matchesResponse = await axios.post(
+        `${matchingService.url}/tasks/${results.task.id}/matches`,
+        {
+          maxResults: 5,
+          includeRisks: true,
+        },
+      );
       results.matches = matchesResponse.data.matches;
 
       // Step 2: Auto-assign if high confidence match exists
       const bestMatch = results.matches[0];
       if (bestMatch && bestMatch.score > 85 && bestMatch.confidence > 0.9) {
-        const assignResponse = await axios.post(`${matchingService.url}/tasks/${results.task.id}/assign`, {
-          employeeId: bestMatch.employeeId,
-          reason: 'Auto-assigned based on high confidence match'
-        });
+        const assignResponse = await axios.post(
+          `${matchingService.url}/tasks/${results.task.id}/assign`,
+          {
+            employeeId: bestMatch.employeeId,
+            reason: 'Auto-assigned based on high confidence match',
+          },
+        );
         results.assignment = assignResponse.data;
 
         // Step 3: Initialize distributed task in edge agent
@@ -374,26 +422,32 @@ class WorkflowOrchestrator {
             payload: {
               taskId: results.task.id,
               employeeId: bestMatch.employeeId,
-              estimatedDuration: taskData.estimatedHours
+              estimatedDuration: taskData.estimatedHours,
             },
-            priority: taskData.priority || 5
+            priority: taskData.priority || 5,
           });
           results.distributedTaskCreated = true;
         }
       } else {
-        results.assignment = { status: 'pending_manual_review', reason: 'No high confidence match found' };
+        results.assignment = {
+          status: 'pending_manual_review',
+          reason: 'No high confidence match found',
+        };
       }
 
-      await redis.setex(`task_assignment:${workflowId}`, 3600, JSON.stringify(results));
+      await redis.setex(
+        `task_assignment:${workflowId}`,
+        3600,
+        JSON.stringify(results),
+      );
 
       logger.info(`Task assignment workflow completed: ${workflowId}`);
       return {
         workflowId,
         status: 'completed',
         results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-
     } catch (error) {
       logger.error(`Task assignment workflow failed: ${workflowId}`, error);
       return {
@@ -401,7 +455,7 @@ class WorkflowOrchestrator {
         status: 'failed',
         error: error.message,
         partialResults: results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     }
   }
@@ -416,11 +470,11 @@ class WorkflowOrchestrator {
 
       // Step 1: Collect service health data
       const services = this.serviceRegistry.getAllServices();
-      results.serviceHealth = services.map(service => ({
+      results.serviceHealth = services.map((service) => ({
         name: service.name,
         status: service.status,
         lastCheck: service.lastCheck,
-        capabilities: service.capabilities
+        capabilities: service.capabilities,
       }));
 
       // Step 2: Check edge agent cluster status
@@ -429,33 +483,44 @@ class WorkflowOrchestrator {
         const stateResponse = await axios.get(`${edgeService.url}/state`);
         results.edgeClusterState = {
           totalAgents: Object.keys(stateResponse.data.agentStates).length,
-          activeAgents: Object.values(stateResponse.data.agentStates).filter((a: any) => a.status === 'active').length,
-          systemMetrics: stateResponse.data.systemMetrics
+          activeAgents: Object.values(stateResponse.data.agentStates).filter(
+            (a: any) => a.status === 'active',
+          ).length,
+          systemMetrics: stateResponse.data.systemMetrics,
         };
       }
 
       // Step 3: Check matching engine performance
-      const matchingService = this.serviceRegistry.getService('matching-engine');
+      const matchingService =
+        this.serviceRegistry.getService('matching-engine');
       if (matchingService && matchingService.status === 'healthy') {
-        const analyticsResponse = await axios.get(`${matchingService.url}/analytics/matching`);
+        const analyticsResponse = await axios.get(
+          `${matchingService.url}/analytics/matching`,
+        );
         results.matchingPerformance = analyticsResponse.data;
       }
 
       // Step 4: Analyze and trigger recovery if needed
-      const unhealthyServices = services.filter(s => s.status === 'unhealthy');
+      const unhealthyServices = services.filter(
+        (s) => s.status === 'unhealthy',
+      );
       if (unhealthyServices.length > 0) {
-        results.recoveryActions = await this.triggerRecoveryActions(unhealthyServices);
+        results.recoveryActions =
+          await this.triggerRecoveryActions(unhealthyServices);
       }
 
-      await redis.setex(`health_monitoring:${workflowId}`, 300, JSON.stringify(results));
+      await redis.setex(
+        `health_monitoring:${workflowId}`,
+        300,
+        JSON.stringify(results),
+      );
 
       return {
         workflowId,
         status: 'completed',
         results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-
     } catch (error) {
       logger.error(`Health monitoring workflow failed: ${workflowId}`, error);
       return {
@@ -463,12 +528,14 @@ class WorkflowOrchestrator {
         status: 'failed',
         error: error.message,
         partialResults: results,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     }
   }
 
-  private async triggerRecoveryActions(unhealthyServices: ServiceConfig[]): Promise<any[]> {
+  private async triggerRecoveryActions(
+    unhealthyServices: ServiceConfig[],
+  ): Promise<any[]> {
     const recoveryActions = [];
 
     for (const service of unhealthyServices) {
@@ -480,15 +547,15 @@ class WorkflowOrchestrator {
             type: 'service_recovery',
             payload: {
               serviceName: service.name,
-              serviceUrl: service.url
+              serviceUrl: service.url,
             },
-            priority: 1 // High priority
+            priority: 1, // High priority
           });
 
           recoveryActions.push({
             service: service.name,
             action: 'recovery_task_created',
-            timestamp: new Date()
+            timestamp: new Date(),
           });
         }
       } catch (error) {
@@ -496,7 +563,7 @@ class WorkflowOrchestrator {
           service: service.name,
           action: 'recovery_failed',
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     }
@@ -511,22 +578,27 @@ const orchestrator = new WorkflowOrchestrator(serviceRegistry);
 
 // Request routing middleware
 const routeToService = (serviceName: string) => {
-  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  return async (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
     const service = serviceRegistry.getService(serviceName);
-    
+    console.log(`[GATEWAY] Forwarding to ${serviceName}:`, req.method, req.url);
+
     if (!service) {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: `Service ${serviceName} not found`,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
     }
 
     if (service.status !== 'healthy') {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: `Service ${serviceName} is currently unavailable`,
         status: service.status,
         lastCheck: service.lastCheck,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
     }
 
@@ -541,7 +613,7 @@ const proxyToService = async (req: express.Request, res: express.Response) => {
   const timer = new PerformanceTimer(advancedLogger, 'proxy_request');
   const serviceName = req.serviceName;
   const service = serviceRegistry.getService(serviceName!);
-  
+
   if (!service?.circuitBreaker) {
     timer.end({ error: 'no_circuit_breaker' });
     return res.status(500).json({ error: 'Service configuration error' });
@@ -550,9 +622,11 @@ const proxyToService = async (req: express.Request, res: express.Response) => {
   try {
     const result = await service.circuitBreaker.execute(
       async () => {
-        const targetUrl = `${req.serviceUrl}${req.path}`;
+        const targetPath = (req as any).forwardPath || req.url;
+        const targetUrl = `${req.serviceUrl}${targetPath}`;
+        console.log(`[GATEWAY] Proxying to: ${targetUrl}`);
         const method = req.method.toLowerCase();
-        
+
         const config: any = {
           method,
           url: targetUrl,
@@ -561,8 +635,8 @@ const proxyToService = async (req: express.Request, res: express.Response) => {
             ...req.headers,
             'x-forwarded-for': req.ip,
             'x-forwarded-proto': req.protocol,
-            'x-request-id': req.correlationId || uuidv4()
-          }
+            'x-request-id': req.correlationId || uuidv4(),
+          },
         };
 
         if (['post', 'put', 'patch'].includes(method)) {
@@ -573,23 +647,35 @@ const proxyToService = async (req: express.Request, res: express.Response) => {
           config.params = req.query;
         }
 
-        advancedLogger.logExternalAPI(serviceName!, `${method.toUpperCase()} ${req.path}`, 0, 0, {
-          correlationId: req.correlationId
-        });
+        advancedLogger.logExternalAPI(
+          serviceName!,
+          `${method.toUpperCase()} ${req.path}`,
+          0,
+          0,
+          {
+            correlationId: req.correlationId,
+          },
+        );
 
         const response = await axios(config);
-        
-        const duration = timer.end({ 
+
+        const duration = timer.end({
           service: serviceName,
           method: method.toUpperCase(),
           path: req.path,
-          statusCode: response.status
+          statusCode: response.status,
         });
-        
-        advancedLogger.logExternalAPI(serviceName!, `${method.toUpperCase()} ${req.path}`, duration, response.status, {
-          correlationId: req.correlationId,
-          success: true
-        });
+
+        advancedLogger.logExternalAPI(
+          serviceName!,
+          `${method.toUpperCase()} ${req.path}`,
+          duration,
+          response.status,
+          {
+            correlationId: req.correlationId,
+            success: true,
+          },
+        );
 
         return response;
       },
@@ -599,47 +685,48 @@ const proxyToService = async (req: express.Request, res: express.Response) => {
           service: serviceName,
           path: req.path,
           method: req.method,
-          circuitBreakerState: service.circuitBreaker?.getState()
+          circuitBreakerState: service.circuitBreaker?.getState(),
         });
-        
+
         // Try to get cached response
         const cacheKey = `fallback:${serviceName}:${req.method}:${req.path}`;
         const cachedResponse = await redis.get(cacheKey);
-        
+
         if (cachedResponse) {
           return { status: 200, data: JSON.parse(cachedResponse) };
         }
-        
-        throw new Error('Service temporarily unavailable - circuit breaker open');
-      }
+
+        throw new Error(
+          'Service temporarily unavailable - circuit breaker open',
+        );
+      },
     );
 
     res.status(result.status).json(result.data);
-
   } catch (error: any) {
     const duration = timer.end({ error: error.message });
-    
+
     advancedLogger.logError(error, {
       context: 'proxy_request',
       service: serviceName,
       method: req.method,
       path: req.path,
       correlationId: req.correlationId,
-      circuitBreakerState: service.circuitBreaker.getState()
+      circuitBreakerState: service.circuitBreaker.getState(),
     });
-    
+
     if (error.response) {
       res.status(error.response.status).json(error.response.data);
     } else if (error.code === 'ECONNREFUSED') {
-      res.status(503).json({ 
+      res.status(503).json({
         error: 'Service temporarily unavailable',
         timestamp: new Date(),
-        circuitBreaker: service.circuitBreaker.getState()
+        circuitBreaker: service.circuitBreaker.getState(),
       });
     } else {
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Internal gateway error',
-        timestamp: new Date()
+        timestamp: new Date(),
       });
     }
   }
@@ -663,22 +750,22 @@ export { serviceRegistry, orchestrator };
 // Gateway health and status
 app.get('/health', (req, res) => {
   const services = serviceRegistry.getAllServices();
-  const healthyCount = services.filter(s => s.status === 'healthy').length;
-  
+  const healthyCount = services.filter((s) => s.status === 'healthy').length;
+
   res.json({
     status: 'healthy',
     gateway: {
       uptime: process.uptime(),
       memory: process.memoryUsage(),
-      version: '1.0.0'
+      version: '1.0.0',
     },
     services: {
       total: services.length,
       healthy: healthyCount,
       unhealthy: services.length - healthyCount,
-      details: services
+      details: services,
     },
-    timestamp: new Date()
+    timestamp: new Date(),
   });
 });
 
@@ -686,7 +773,7 @@ app.get('/health', (req, res) => {
 app.get('/services', (req, res) => {
   res.json({
     services: serviceRegistry.getAllServices(),
-    timestamp: new Date()
+    timestamp: new Date(),
   });
 });
 
@@ -730,10 +817,43 @@ app.get('/workflows/health-monitoring', async (req, res) => {
 });
 
 // Service proxy routes
-app.use('/api/hr/*', routeToService('hr-resource'), proxyToService);
-app.use('/api/matching/*', routeToService('matching-engine'), proxyToService);
-app.use('/api/verification/*', routeToService('verification'), proxyToService);
-app.use('/api/edge/*', routeToService('edge-agent'), proxyToService);
+app.use(
+  '/api/hr/*',
+  routeToService('hr-resource'),
+  (req, _res, next) => {
+    req.forwardPath = req.originalUrl.replace(/^\/api\/hr/, '') || '/';
+    next();
+  },
+  proxyToService,
+);
+app.use(
+  '/api/matching/*',
+  routeToService('matching-engine'),
+  (req, _res, next) => {
+    req.forwardPath = req.originalUrl.replace(/^\/api\/matching/, '') || '/';
+    next();
+  },
+  proxyToService,
+);
+app.use(
+  '/api/verification/*',
+  routeToService('verification'),
+  (req, _res, next) => {
+    req.forwardPath =
+      req.originalUrl.replace(/^\/api\/verification/, '') || '/';
+    next();
+  },
+  proxyToService,
+);
+app.use(
+  '/api/edge/*',
+  routeToService('edge-agent'),
+  (req, _res, next) => {
+    req.forwardPath = req.originalUrl.replace(/^\/api\/edge/, '') || '/';
+    next();
+  },
+  proxyToService,
+);
 
 // Analytics and monitoring
 app.get('/analytics/overview', async (req, res) => {
@@ -742,24 +862,32 @@ app.get('/analytics/overview', async (req, res) => {
     const analytics: any = {
       services: {
         total: services.length,
-        healthy: services.filter(s => s.status === 'healthy').length,
-        unhealthy: services.filter(s => s.status === 'unhealthy').length
+        healthy: services.filter((s) => s.status === 'healthy').length,
+        unhealthy: services.filter((s) => s.status === 'unhealthy').length,
       },
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     // Collect analytics from each service if available
-    for (const service of services.filter(s => s.status === 'healthy')) {
+    for (const service of services.filter((s) => s.status === 'healthy')) {
       try {
         if (service.name === 'matching-engine') {
-          const response = await axios.get(`${service.url}/analytics/matching`, { timeout: 5000 });
+          const response = await axios.get(
+            `${service.url}/analytics/matching`,
+            { timeout: 5000 },
+          );
           analytics.matching = response.data;
         } else if (service.name === 'edge-agent') {
-          const response = await axios.get(`${service.url}/analytics`, { timeout: 5000 });
+          const response = await axios.get(`${service.url}/analytics`, {
+            timeout: 5000,
+          });
           analytics.edgeCluster = response.data;
         }
       } catch (error) {
-        logger.warn(`Failed to collect analytics from ${service.name}:`, error.message);
+        logger.warn(
+          `Failed to collect analytics from ${service.name}:`,
+          error.message,
+        );
       }
     }
 
@@ -775,12 +903,12 @@ const wsPort = parseInt(process.env.GATEWAY_WS_PORT!) || 3010;
 
 let wss: WebSocket.Server;
 try {
-  wss = new WebSocket.Server({ 
+  wss = new WebSocket.Server({
     port: wsPort,
     perMessageDeflate: false,
-    maxPayload: 16 * 1024 * 1024 // 16MB
+    maxPayload: 16 * 1024 * 1024, // 16MB
   });
-  
+
   logger.info(`WebSocket server starting on port ${wsPort}`);
 } catch (error) {
   logger.error(`Failed to start WebSocket server on port ${wsPort}:`, error);
@@ -791,29 +919,35 @@ try {
 if (wss) {
   wss.on('connection', (ws) => {
     logger.info('New monitoring client connected');
-    
+
     // Send initial system status
     const initialStatus = {
       type: 'system_status',
       data: {
         services: serviceRegistry.getAllServices(),
-        timestamp: new Date()
-      }
+        timestamp: new Date(),
+      },
     };
     ws.send(JSON.stringify(initialStatus));
 
     // Subscribe to service events
     const onServiceEvent = (event: string, data: any) => {
-      ws.send(JSON.stringify({
-        type: 'service_event',
-        event,
-        data,
-        timestamp: new Date()
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'service_event',
+          event,
+          data,
+          timestamp: new Date(),
+        }),
+      );
     };
 
-    orchestrationEvents.on('service_failed', (data) => onServiceEvent('service_failed', data));
-    orchestrationEvents.on('service_recovered', (data) => onServiceEvent('service_recovered', data));
+    orchestrationEvents.on('service_failed', (data) =>
+      onServiceEvent('service_failed', data),
+    );
+    orchestrationEvents.on('service_recovered', (data) =>
+      onServiceEvent('service_recovered', data),
+    );
 
     ws.on('close', () => {
       logger.info('Monitoring client disconnected');
@@ -830,14 +964,21 @@ if (wss) {
 }
 
 // Error handling middleware
-app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error('Unhandled error:', error);
-  res.status(500).json({
-    error: 'Internal server error',
-    requestId: req.headers['x-request-id'] || uuidv4(),
-    timestamp: new Date()
-  });
-});
+app.use(
+  (
+    error: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    logger.error('Unhandled error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      requestId: req.headers['x-request-id'] || uuidv4(),
+      timestamp: new Date(),
+    });
+  },
+);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -845,28 +986,28 @@ app.use('*', (req, res) => {
     error: 'Endpoint not found',
     path: req.originalUrl,
     method: req.method,
-    timestamp: new Date()
+    timestamp: new Date(),
   });
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   logger.info('Shutting down API Gateway...');
-  
+
   serviceRegistry.destroy();
   wss.close();
   await redis.disconnect();
-  
+
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   logger.info('Shutting down API Gateway...');
-  
+
   serviceRegistry.destroy();
   wss.close();
   await redis.disconnect();
-  
+
   process.exit(0);
 });
 

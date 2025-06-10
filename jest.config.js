@@ -1,1 +1,30 @@
-module.exports = {\n  preset: 'ts-jest',\n  testEnvironment: 'node',\n  testMatch: [\n    '<rootDir>/tests/**/*.test.ts',\n    '<rootDir>/tests/**/*.test.js'\n  ],\n  testPathIgnorePatterns: [\n    '/node_modules/',\n    '/dist/'\n  ],\n  collectCoverageFrom: [\n    'src/**/*.{ts,js}',\n    '!src/**/*.d.ts',\n    '!src/**/*.test.{ts,js}'\n  ],\n  coverageDirectory: 'coverage',\n  coverageReporters: [\n    'text',\n    'lcov',\n    'html'\n  ],\n  setupFilesAfterEnv: [],\n  testTimeout: 60000,\n  maxWorkers: 1, // Integration tests should run sequentially\n  verbose: true,\n  forceExit: true,\n  detectOpenHandles: true,\n  globals: {\n    'ts-jest': {\n      tsconfig: 'tsconfig.json'\n    }\n  },\n  moduleNameMapping: {\n    '^@/(.*)$': '<rootDir>/src/$1',\n    '^@tests/(.*)$': '<rootDir>/tests/$1'\n  }\n};"
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  testMatch: ['<rootDir>/tests/**/*.test.ts', '<rootDir>/tests/**/*.test.js'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
+  collectCoverageFrom: [
+    'src/**/*.{ts,js}',
+    '!src/**/*.d.ts',
+    '!src/**/*.test.{ts,js}',
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov', 'html'],
+  testTimeout: 60000,
+  maxWorkers: 1,
+  verbose: true,
+  forceExit: true,
+  detectOpenHandles: true,
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        tsconfig: 'tsconfig.json',
+      },
+    ],
+  },
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^@tests/(.*)$': '<rootDir>/tests/$1',
+  },
+};

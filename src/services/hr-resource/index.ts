@@ -1,12 +1,12 @@
+import { EventEmitter } from 'events';
+import dotenv from 'dotenv';
 import express from 'express';
 import ldap from 'ldapjs';
 import neo4j from 'neo4j-driver';
+import cron from 'node-cron';
 import { v4 as uuidv4 } from 'uuid';
 import winston from 'winston';
-import dotenv from 'dotenv';
-import cron from 'node-cron';
 import WebSocket from 'ws';
-import { EventEmitter } from 'events';
 
 dotenv.config();
 
@@ -16,18 +16,21 @@ const logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
-    winston.format.json()
+    winston.format.json(),
   ),
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(
         winston.format.colorize(),
-        winston.format.simple()
-      )
+        winston.format.simple(),
+      ),
     }),
     new winston.transports.File({ filename: 'hr-resource.log' }),
-    new winston.transports.File({ filename: 'hr-resource-error.log', level: 'error' })
-  ]
+    new winston.transports.File({
+      filename: 'hr-resource-error.log',
+      level: 'error',
+    }),
+  ],
 });
 
 // Event emitter for real-time updates
@@ -41,7 +44,10 @@ app.use(express.json());
 let ldapClient: any;
 
 const createLdapClient = () => {
-  if (process.env.MOCK_LDAP_ENABLED === 'true' || process.env.NODE_ENV === 'development') {
+  if (
+    process.env.MOCK_LDAP_ENABLED === 'true' ||
+    process.env.NODE_ENV === 'development'
+  ) {
     // Mock LDAP client for local development
     ldapClient = {
       bind: (dn: string, password: string, callback: Function) => {
@@ -58,14 +64,14 @@ const createLdapClient = () => {
       },
       unbind: () => {
         logger.info('Mock LDAP unbind');
-      }
+      },
     };
     logger.info('Using Mock LDAP client for local development');
   } else {
     // Real LDAP client
     ldapClient = ldap.createClient({
       url: process.env.LDAP_URL!,
-      reconnect: true
+      reconnect: true,
     });
 
     ldapClient.on('error', (err: any) => {
@@ -73,14 +79,18 @@ const createLdapClient = () => {
       setTimeout(createLdapClient, 5000);
     });
 
-    ldapClient.bind(process.env.LDAP_BIND_DN!, process.env.LDAP_BIND_PASSWORD!, (err: any) => {
-      if (err) {
-        logger.error('LDAP bind failed:', err);
-        setTimeout(createLdapClient, 5000);
-      } else {
-        logger.info('LDAP bind successful');
-      }
-    });
+    ldapClient.bind(
+      process.env.LDAP_BIND_DN!,
+      process.env.LDAP_BIND_PASSWORD!,
+      (err: any) => {
+        if (err) {
+          logger.error('LDAP bind failed:', err);
+          setTimeout(createLdapClient, 5000);
+        } else {
+          logger.info('LDAP bind successful');
+        }
+      },
+    );
   }
 };
 
@@ -94,16 +104,16 @@ try {
   neo4jDriver = neo4j.driver(
     process.env.NEO4J_URI || 'bolt://localhost:7687',
     neo4j.auth.basic(
-      process.env.NEO4J_USER || 'neo4j', 
-      process.env.NEO4J_PASSWORD || 'password'
+      process.env.NEO4J_USER || 'neo4j',
+      process.env.NEO4J_PASSWORD || 'password',
     ),
     {
       maxConnectionPoolSize: 50,
       connectionAcquisitionTimeout: 30000,
       connectionTimeout: 20000,
-      encrypted: false,  // 암호화 비활성화
-      trust: 'TRUST_ALL_CERTIFICATES'  // 모든 인증서 신뢰
-    }
+      encrypted: false, // 암호화 비활성화
+      trust: 'TRUST_ALL_CERTIFICATES', // 모든 인증서 신뢰
+    },
   );
   logger.info('Neo4j driver initialized');
 } catch (error) {
@@ -196,11 +206,13 @@ interface WorkloadAssignment {
 }
 
 // WebSocket server for real-time updates
-const wss = new WebSocket.Server({ port: parseInt(process.env.WS_PORT!) || 3011 });
+const wss = new WebSocket.Server({
+  port: parseInt(process.env.WS_PORT!) || 3011,
+});
 
 wss.on('connection', (ws) => {
   logger.info('New WebSocket connection established');
-  
+
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message.toString());
@@ -226,7 +238,9 @@ const handleWebSocketMessage = (ws: WebSocket, data: any) => {
       hrEventEmitter.emit('employee_updated', data.payload);
       break;
     default:
-      ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
+      ws.send(
+        JSON.stringify({ type: 'error', message: 'Unknown message type' }),
+      );
   }
 };
 
@@ -246,29 +260,39 @@ const initializeDatabase = async () => {
     logger.warn('Neo4j driver not available, skipping database initialization');
     return;
   }
-  
+
   const session = neo4jDriver.session();
   try {
     // Test connection first with timeout
     const testResult = await Promise.race([
       session.run('RETURN 1'),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout')), 5000)
-      )
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timeout')), 5000),
+      ),
     ]);
-    
+
     // Create constraints and indexes
-    await session.run('CREATE CONSTRAINT employee_id IF NOT EXISTS FOR (e:Employee) REQUIRE e.id IS UNIQUE');
-    await session.run('CREATE CONSTRAINT cert_id IF NOT EXISTS FOR (c:Certification) REQUIRE c.id IS UNIQUE');
-    await session.run('CREATE INDEX employee_email IF NOT EXISTS FOR (e:Employee) ON (e.email)');
-    await session.run('CREATE INDEX employee_department IF NOT EXISTS FOR (e:Employee) ON (e.department)');
-    await session.run('CREATE INDEX employee_skills IF NOT EXISTS FOR (e:Employee) ON (e.skills)');
-    
+    await session.run(
+      'CREATE CONSTRAINT employee_id IF NOT EXISTS FOR (e:Employee) REQUIRE e.id IS UNIQUE',
+    );
+    await session.run(
+      'CREATE CONSTRAINT cert_id IF NOT EXISTS FOR (c:Certification) REQUIRE c.id IS UNIQUE',
+    );
+    await session.run(
+      'CREATE INDEX employee_email IF NOT EXISTS FOR (e:Employee) ON (e.email)',
+    );
+    await session.run(
+      'CREATE INDEX employee_department IF NOT EXISTS FOR (e:Employee) ON (e.department)',
+    );
+    await session.run(
+      'CREATE INDEX employee_skills IF NOT EXISTS FOR (e:Employee) ON (e.skills)',
+    );
+
     logger.info('Database schema initialized successfully');
   } catch (error) {
     logger.error('Error initializing database schema:', error);
     logger.warn('Database operations will use mock mode');
-    
+
     // Disable Neo4j driver for subsequent operations
     neo4jDriver = null;
   } finally {
@@ -303,20 +327,22 @@ class ResourceMatchingEngine {
       const result = await session.run(query, {
         requiredSkills: request.requiredSkills,
         remote: request.remote,
-        location: request.location
+        location: request.location,
       });
 
       const candidates = result.records.map((record: any) => ({
         employee: record.get('e').properties as Employee,
         skillMatch: record.get('skillMatch').toNumber(),
-        availableCapacity: record.get('availableCapacity').toNumber()
+        availableCapacity: record.get('availableCapacity').toNumber(),
       }));
 
       // Apply additional filters and scoring
-      const scoredCandidates = candidates.map((candidate: any) => ({
-        ...candidate,
-        score: this.calculateMatchScore(candidate, request)
-      })).sort((a: any, b: any) => b.score - a.score);
+      const scoredCandidates = candidates
+        .map((candidate: any) => ({
+          ...candidate,
+          score: this.calculateMatchScore(candidate, request),
+        }))
+        .sort((a: any, b: any) => b.score - a.score);
 
       return scoredCandidates.slice(0, 5).map((c: any) => c.employee);
     } finally {
@@ -324,29 +350,32 @@ class ResourceMatchingEngine {
     }
   }
 
-  private static calculateMatchScore(candidate: any, request: ResourceRequest): number {
+  private static calculateMatchScore(
+    candidate: any,
+    request: ResourceRequest,
+  ): number {
     let score = 0;
-    
+
     // Skill match weight: 40%
     score += (candidate.skillMatch / request.requiredSkills.length) * 40;
-    
+
     // Availability weight: 30%
     score += (candidate.availableCapacity / 100) * 30;
-    
+
     // Priority adjustment: 20%
     const priorityMultiplier = {
-      'low': 0.8,
-      'medium': 1.0,
-      'high': 1.2,
-      'critical': 1.5
+      low: 0.8,
+      medium: 1.0,
+      high: 1.2,
+      critical: 1.5,
     };
     score *= priorityMultiplier[request.priority];
-    
+
     // Location preference: 10%
     if (request.remote || !request.location) {
       score += 10;
     }
-    
+
     return score;
   }
 }
@@ -357,21 +386,24 @@ class WorkloadManager {
     const session = neo4jDriver.session();
     try {
       // Calculate current workload based on active assignments
-      const result = await session.run(`
+      const result = await session.run(
+        `
         MATCH (e:Employee {id: $employeeId})
         OPTIONAL MATCH (e)-[:ASSIGNED_TO]->(t:Task)
         WHERE t.status IN ['active', 'pending']
         WITH e, sum(t.allocation) as totalAllocation
         SET e.workload = coalesce(totalAllocation, 0)
         RETURN e.workload as workload
-      `, { employeeId });
+      `,
+        { employeeId },
+      );
 
       const workload = result.records[0]?.get('workload')?.toNumber() || 0;
-      
+
       // Emit workload update event
       hrEventEmitter.emit('workload_updated', { employeeId, workload });
       broadcastUpdate('workload_update', { employeeId, workload });
-      
+
       return workload;
     } finally {
       await session.close();
@@ -381,18 +413,21 @@ class WorkloadManager {
   static async getTeamWorkload(departmentOrManager: string): Promise<any[]> {
     const session = neo4jDriver.session();
     try {
-      const result = await session.run(`
+      const result = await session.run(
+        `
         MATCH (e:Employee)
         WHERE e.department = $dept OR e.manager = $manager
         RETURN e.id as employeeId, e.name as name, e.workload as workload, e.availability as availability
         ORDER BY e.workload DESC
-      `, { dept: departmentOrManager, manager: departmentOrManager });
+      `,
+        { dept: departmentOrManager, manager: departmentOrManager },
+      );
 
       return result.records.map((record: any) => ({
         employeeId: record.get('employeeId'),
         name: record.get('name'),
         workload: record.get('workload'),
-        availability: record.get('availability')
+        availability: record.get('availability'),
       }));
     } finally {
       await session.close();
@@ -404,38 +439,38 @@ class WorkloadManager {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     timestamp: new Date(),
     services: {
       ldap: ldapClient ? 'mock-enabled' : 'disconnected',
       neo4j: neo4jDriver ? 'driver-ready' : 'not-available',
-      websocket: `${wss.clients.size} clients connected`
+      websocket: `${wss.clients.size} clients connected`,
     },
-    mode: 'development'
+    mode: 'development',
   });
 });
 
 // Get all employees with advanced filtering
 app.get('/employees', async (req, res) => {
-  const { 
-    department, 
-    skill, 
-    available, 
-    location, 
+  const {
+    department,
+    skill,
+    available,
+    location,
     role,
     limit = 50,
     offset = 0,
     sortBy = 'name',
-    sortOrder = 'ASC'
+    sortOrder = 'ASC',
   } = req.query;
 
   const session = neo4jDriver.session();
   try {
     let whereClause = '';
-    const params: any = { 
-      limit: neo4j.int(parseInt(limit.toString())), 
-      offset: neo4j.int(parseInt(offset.toString())) 
+    const params: any = {
+      limit: neo4j.int(parseInt(limit.toString())),
+      offset: neo4j.int(parseInt(offset.toString())),
     };
 
     const conditions = [];
@@ -444,7 +479,7 @@ app.get('/employees', async (req, res) => {
       params.department = department;
     }
     if (skill) {
-      conditions.push('$skill IN [s IN e.skills | s.name]');
+      conditions.push(`e.skills CONTAINS $skill`);
       params.skill = skill;
     }
     if (available !== undefined) {
@@ -475,35 +510,54 @@ app.get('/employees', async (req, res) => {
     const result = await session.run(query, params);
     const employees = result.records.map((record: any) => {
       const employeeData = record.get('e').properties;
-      
+
       // Parse JSON strings back to objects
       let parsedEmployee = { ...employeeData };
-      
+
       try {
         if (employeeData.skills && typeof employeeData.skills === 'string') {
           parsedEmployee.skills = JSON.parse(employeeData.skills);
         }
-        if (employeeData.availability && typeof employeeData.availability === 'string') {
+        if (
+          employeeData.availability &&
+          typeof employeeData.availability === 'string'
+        ) {
           parsedEmployee.availability = JSON.parse(employeeData.availability);
         }
-        if (employeeData.certifications && typeof employeeData.certifications === 'string') {
-          parsedEmployee.certifications = JSON.parse(employeeData.certifications);
+        if (
+          employeeData.certifications &&
+          typeof employeeData.certifications === 'string'
+        ) {
+          parsedEmployee.certifications = JSON.parse(
+            employeeData.certifications,
+          );
         }
-        if (employeeData.contactInfo && typeof employeeData.contactInfo === 'string') {
+        if (
+          employeeData.contactInfo &&
+          typeof employeeData.contactInfo === 'string'
+        ) {
           parsedEmployee.contactInfo = JSON.parse(employeeData.contactInfo);
         }
-        if (employeeData.emergencyContact && typeof employeeData.emergencyContact === 'string') {
-          parsedEmployee.emergencyContact = JSON.parse(employeeData.emergencyContact);
+        if (
+          employeeData.emergencyContact &&
+          typeof employeeData.emergencyContact === 'string'
+        ) {
+          parsedEmployee.emergencyContact = JSON.parse(
+            employeeData.emergencyContact,
+          );
         }
       } catch (parseError) {
         logger.warn('Error parsing employee JSON data:', parseError);
       }
-      
+
       return parsedEmployee;
     });
-    
+
     // Get total count
-    const countResult = await session.run(`MATCH (e:Employee) ${whereClause} RETURN count(e) as total`, params);
+    const countResult = await session.run(
+      `MATCH (e:Employee) ${whereClause} RETURN count(e) as total`,
+      params,
+    );
     const total = countResult.records[0].get('total').toNumber();
 
     res.json({
@@ -512,8 +566,8 @@ app.get('/employees', async (req, res) => {
         total,
         limit: parseInt(limit.toString()),
         offset: parseInt(offset.toString()),
-        pages: Math.ceil(total / parseInt(limit.toString()))
-      }
+        pages: Math.ceil(total / parseInt(limit.toString())),
+      },
     });
   } catch (error) {
     logger.error('Error fetching employees:', error);
@@ -526,9 +580,12 @@ app.get('/employees', async (req, res) => {
 // Create employee with enhanced validation
 app.post('/employees', async (req, res) => {
   try {
+    console.log('Creating employee with data:', req.body);
     // Validate required fields
     if (!req.body.name || !req.body.email || !req.body.department) {
-      return res.status(400).json({ error: 'Missing required fields: name, email, department' });
+      return res
+        .status(400)
+        .json({ error: 'Missing required fields: name, email, department' });
     }
 
     // Set default values for all optional fields
@@ -546,32 +603,38 @@ app.post('/employees', async (req, res) => {
       availability: req.body.availability || {
         available: true,
         capacity: 100,
-        maxHoursPerWeek: 40
+        maxHoursPerWeek: 40,
       },
       contactInfo: req.body.contactInfo || {
         phone: '',
-        address: ''
+        address: '',
       },
       certifications: req.body.certifications || [],
       timezone: req.body.timezone || 'UTC',
       emergencyContact: req.body.emergencyContact || {
         name: '',
         relationship: '',
-        phone: ''
+        phone: '',
       },
-      manager: req.body.manager || null
+      manager: req.body.manager || null,
     };
 
     const session = neo4jDriver.session();
     try {
       // Check if email already exists
-      const existingResult = await session.run('MATCH (e:Employee {email: $email}) RETURN e', { email: employeeWithDefaults.email });
+      const existingResult = await session.run(
+        'MATCH (e:Employee {email: $email}) RETURN e',
+        { email: employeeWithDefaults.email },
+      );
       if (existingResult.records.length > 0) {
-        return res.status(409).json({ error: 'Employee with this email already exists' });
+        return res
+          .status(409)
+          .json({ error: 'Employee with this email already exists' });
       }
 
       // Create in Neo4j with all required parameters (serialize complex objects)
-      await session.run(`
+      await session.run(
+        `
         CREATE (e:Employee {
           id: $id,
           name: $name,
@@ -591,31 +654,43 @@ app.post('/employees', async (req, res) => {
           createdAt: $createdAt,
           updatedAt: $updatedAt
         })
-      `, {
-        ...employeeWithDefaults,
-        skills: JSON.stringify(employeeWithDefaults.skills),
-        availability: JSON.stringify(employeeWithDefaults.availability),
-        certifications: JSON.stringify(employeeWithDefaults.certifications),
-        contactInfo: JSON.stringify(employeeWithDefaults.contactInfo),
-        emergencyContact: JSON.stringify(employeeWithDefaults.emergencyContact),
-        createdAt: employeeWithDefaults.createdAt.toISOString(),
-        updatedAt: employeeWithDefaults.updatedAt.toISOString()
-      });
+      `,
+        {
+          ...employeeWithDefaults,
+          skills: JSON.stringify(employeeWithDefaults.skills),
+          availability: JSON.stringify(employeeWithDefaults.availability),
+          certifications: JSON.stringify(employeeWithDefaults.certifications),
+          contactInfo: JSON.stringify(employeeWithDefaults.contactInfo),
+          emergencyContact: JSON.stringify(
+            employeeWithDefaults.emergencyContact,
+          ),
+          createdAt: employeeWithDefaults.createdAt.toISOString(),
+          updatedAt: employeeWithDefaults.updatedAt.toISOString(),
+        },
+      );
 
       // Create manager relationship if specified
       if (employeeWithDefaults.manager) {
-        await session.run(`
+        await session.run(
+          `
           MATCH (e:Employee {id: $employeeId}), (m:Employee {id: $managerId})
           CREATE (e)-[:REPORTS_TO]->(m)
           WITH m
           SET m.directReports = coalesce(m.directReports, []) + $employeeId
-        `, { employeeId: employeeWithDefaults.id, managerId: employeeWithDefaults.manager });
+        `,
+          {
+            employeeId: employeeWithDefaults.id,
+            managerId: employeeWithDefaults.manager,
+          },
+        );
       }
 
       // Create in LDAP
       const entry = {
         cn: employeeWithDefaults.name,
-        sn: employeeWithDefaults.name.split(' ').pop() || employeeWithDefaults.name,
+        sn:
+          employeeWithDefaults.name.split(' ').pop() ||
+          employeeWithDefaults.name,
         givenName: employeeWithDefaults.name.split(' ')[0],
         mail: employeeWithDefaults.email,
         objectClass: ['inetOrgPerson', 'person', 'top'],
@@ -623,11 +698,11 @@ app.post('/employees', async (req, res) => {
         ou: employeeWithDefaults.department,
         title: employeeWithDefaults.role,
         telephoneNumber: employeeWithDefaults.contactInfo?.phone || '',
-        l: employeeWithDefaults.location
+        l: employeeWithDefaults.location,
       };
 
       const dn = `uid=${employeeWithDefaults.id},ou=people,${process.env.LDAP_BASE_DN}`;
-      
+
       ldapClient.add(dn, entry, (err: any) => {
         if (err) {
           logger.error('LDAP add error:', err);
@@ -650,23 +725,97 @@ app.post('/employees', async (req, res) => {
   }
 });
 
+app.get('/employees/:id', async (req, res) => {
+  const { id } = req.params;
+  const session = neo4jDriver.session();
+
+  try {
+    const result = await session.run('MATCH (e:Employee {id: $id}) RETURN e', {
+      id,
+    });
+
+    if (result.records.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const employee = result.records[0].get('e').properties;
+
+    // JSON 파싱
+    const parsed = {
+      ...employee,
+      skills: JSON.parse(employee.skills || '[]'),
+      availability: JSON.parse(employee.availability || '{}'),
+      certifications: JSON.parse(employee.certifications || '[]'),
+      contactInfo: JSON.parse(employee.contactInfo || '{}'),
+      emergencyContact: JSON.parse(employee.emergencyContact || '{}'),
+    };
+
+    res.json(parsed);
+  } catch (error) {
+    logger.error('Error retrieving employee:', error);
+    res.status(500).json({ error: 'Failed to retrieve employee' });
+  } finally {
+    await session.close();
+  }
+});
+
 // Update employee
 app.put('/employees/:id', async (req, res) => {
   const { id } = req.params;
-  const updates = { ...req.body, updatedAt: new Date() };
+
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ error: 'Invalid employee ID' });
+  }
+
+  const updates = { ...req.body, updatedAt: new Date().toISOString() };
+
+  const fieldsToStringify = [
+    'skills',
+    'availability',
+    'certifications',
+    'contactInfo',
+    'emergencyContact',
+  ];
+
+  for (const key of fieldsToStringify) {
+    const value = updates[key];
+
+    if (
+      value == null || // null 또는 undefined
+      (typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.keys(value).length === 0) || // 빈 객체
+      (Array.isArray(value) && value.length === 0) // 빈 배열
+    ) {
+      delete updates[key];
+    } else {
+      updates[key] = JSON.stringify(value);
+    }
+  }
+
+  console.log('Updating employee with data:', updates);
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No valid fields to update' });
+  }
 
   const session = neo4jDriver.session();
   try {
     // Build dynamic update query
     const setClause = Object.keys(updates)
-      .map(key => `e.${key} = $${key}`)
+      .map((key) => `e.${key} = $${key}`)
       .join(', ');
 
-    const result = await session.run(`
+    console.log('[DEBUG] Neo4j Query Params:', { id, ...updates });
+
+    const result = await session.run(
+      `
       MATCH (e:Employee {id: $id})
       SET ${setClause}
       RETURN e
-    `, { id, ...updates });
+    `,
+      { id, ...updates },
+    );
 
     if (result.records.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
@@ -700,17 +849,17 @@ app.post('/resources/match', async (req, res) => {
       createdAt: new Date(),
       status: 'pending',
       assignedEmployees: [],
-      ...req.body
+      ...req.body,
     };
 
     const matches = await ResourceMatchingEngine.findOptimalMatch(request);
-    
+
     res.json({
       requestId: request.id,
-      matches: matches.map(employee => ({
+      matches: matches.map((employee) => ({
         employee,
-        matchScore: 'calculated_dynamically' // In real implementation, return actual score
-      }))
+        matchScore: 'calculated_dynamically', // In real implementation, return actual score
+      })),
     });
   } catch (error) {
     logger.error('Error matching resources:', error);
@@ -721,7 +870,7 @@ app.post('/resources/match', async (req, res) => {
 // Get employee workload
 app.get('/employees/:id/workload', async (req, res) => {
   const { id } = req.params;
-  
+
   try {
     const workload = await WorkloadManager.updateEmployeeWorkload(id);
     res.json({ employeeId: id, workload, timestamp: new Date() });
@@ -734,10 +883,14 @@ app.get('/employees/:id/workload', async (req, res) => {
 // Get team workload overview
 app.get('/workload/team/:identifier', async (req, res) => {
   const { identifier } = req.params;
-  
+
   try {
     const teamWorkload = await WorkloadManager.getTeamWorkload(identifier);
-    res.json({ team: identifier, members: teamWorkload, timestamp: new Date() });
+    res.json({
+      team: identifier,
+      members: teamWorkload,
+      timestamp: new Date(),
+    });
   } catch (error) {
     logger.error('Error fetching team workload:', error);
     res.status(500).json({ error: 'Failed to fetch team workload' });
@@ -751,7 +904,7 @@ app.get('/analytics/skills', async (req, res) => {
     return res.json([
       { skill: 'JavaScript', distribution: [{ level: 'advanced', count: 2 }] },
       { skill: 'React', distribution: [{ level: 'expert', count: 1 }] },
-      { skill: 'Node.js', distribution: [{ level: 'advanced', count: 1 }] }
+      { skill: 'Node.js', distribution: [{ level: 'advanced', count: 1 }] },
     ]);
   }
 
@@ -765,7 +918,7 @@ app.get('/analytics/skills', async (req, res) => {
     `);
 
     const skillsMap = new Map();
-    
+
     result.records.forEach((record: any) => {
       try {
         const skillsJson = record.get('skillsJson');
@@ -787,16 +940,20 @@ app.get('/analytics/skills', async (req, res) => {
       }
     });
 
-    const skillsAnalytics = Array.from(skillsMap.entries()).map(([skillName, levelMap]) => {
-      const distribution = Array.from(levelMap.entries()).map(([level, count]) => ({
-        level,
-        count
-      }));
-      return {
-        skill: skillName,
-        distribution
-      };
-    });
+    const skillsAnalytics = Array.from(skillsMap.entries()).map(
+      ([skillName, levelMap]) => {
+        const distribution = Array.from(levelMap.entries()).map(
+          ([level, count]) => ({
+            level,
+            count,
+          }),
+        );
+        return {
+          skill: skillName,
+          distribution,
+        };
+      },
+    );
 
     res.json(skillsAnalytics);
   } catch (error) {
@@ -817,13 +974,13 @@ app.get('/organization/hierarchy', async (req, res) => {
       RETURN e, m, r
       ORDER BY m.name, e.name
     `);
-    
+
     const hierarchy = result.records.map((record: any) => ({
       employee: record.get('e').properties,
       manager: record.get('m') ? record.get('m').properties : null,
-      relationship: record.get('r') ? record.get('r').properties : null
+      relationship: record.get('r') ? record.get('r').properties : null,
     }));
-    
+
     res.json(hierarchy);
   } catch (error) {
     logger.error('Error fetching hierarchy:', error);
@@ -836,30 +993,33 @@ app.get('/organization/hierarchy', async (req, res) => {
 // Certification verification endpoint (blockchain integration point)
 app.post('/certifications/verify', async (req, res) => {
   const { certificationId, blockchainHash } = req.body;
-  
+
   try {
     // This would integrate with blockchain verification service
     // For now, return mock verification
     const verified = blockchainHash && blockchainHash.length > 0;
-    
+
     if (verified) {
       const session = neo4jDriver.session();
       try {
-        await session.run(`
+        await session.run(
+          `
           MATCH (c:Certification {id: $certificationId})
           SET c.verified = true, c.verifiedAt = datetime()
           RETURN c
-        `, { certificationId });
+        `,
+          { certificationId },
+        );
       } finally {
         await session.close();
       }
     }
-    
-    res.json({ 
-      certificationId, 
-      verified, 
+
+    res.json({
+      certificationId,
+      verified,
       timestamp: new Date(),
-      blockchainHash 
+      blockchainHash,
     });
   } catch (error) {
     logger.error('Error verifying certification:', error);
@@ -870,18 +1030,20 @@ app.post('/certifications/verify', async (req, res) => {
 // Periodic workload recalculation
 cron.schedule('0 */6 * * *', async () => {
   logger.info('Starting periodic workload recalculation');
-  
+
   const session = neo4jDriver.session();
   try {
     const result = await session.run('MATCH (e:Employee) RETURN e.id as id');
     const employeeIds = result.records.map((record: any) => record.get('id'));
-    
+
     for (const employeeId of employeeIds) {
       await WorkloadManager.updateEmployeeWorkload(employeeId);
-      await new Promise(resolve => setTimeout(resolve, 100)); // Rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 100)); // Rate limiting
     }
-    
-    logger.info(`Workload recalculation completed for ${employeeIds.length} employees`);
+
+    logger.info(
+      `Workload recalculation completed for ${employeeIds.length} employees`,
+    );
   } catch (error) {
     logger.error('Error in periodic workload recalculation:', error);
   } finally {
@@ -896,36 +1058,38 @@ initializeDatabase();
 const PORT = process.env.HR_SERVICE_PORT || 3001;
 app.listen(PORT, () => {
   logger.info(`HR Resource Service running on port ${PORT}`);
-  logger.info(`WebSocket server running on port ${parseInt(process.env.WS_PORT!) || 3011}`);
+  logger.info(
+    `WebSocket server running on port ${parseInt(process.env.WS_PORT!) || 3011}`,
+  );
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   logger.info('Shutting down HR Resource Service...');
-  
+
   if (ldapClient && ldapClient.unbind) {
     ldapClient.unbind();
   }
-  
+
   if (neo4jDriver) {
     await neo4jDriver.close();
   }
-  
+
   wss.close();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   logger.info('Shutting down HR Resource Service...');
-  
+
   if (ldapClient && ldapClient.unbind) {
     ldapClient.unbind();
   }
-  
+
   if (neo4jDriver) {
     await neo4jDriver.close();
   }
-  
+
   wss.close();
   process.exit(0);
 });

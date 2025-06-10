@@ -13,28 +13,29 @@
     "dev:matching": "nodemon --exec \"npx ts-node --transpile-only\" src/services/matching-engine/index.ts",
     "dev:verification": "nodemon --exec \"npx ts-node --transpile-only\" src/services/verification/index.ts",
     "dev:edge": "nodemon --exec \"npx ts-node --transpile-only\" src/services/edge-agent/index.ts",
-    "dev:all": "concurrently \"pnpm dev:gateway\" \"pnpm dev:hr\" \"pnpm dev:matching\" \"pnpm dev:verification\" \"pnpm dev:edge\"",
-    
+    "dev:outsourcing": "nodemon --exec \"npx ts-node --transpile-only\" src/services/outsourcing/index.ts",
+    "dev:all": "concurrently \"pnpm dev:gateway\" \"pnpm dev:hr\" \"pnpm dev:matching\" \"pnpm dev:verification\" \"pnpm dev:edge\" \"pnpm dev:outsourcing\"",
     "docker:dev": "docker-compose up -d --build",
     "docker:infra": "docker-compose up -d neo4j redis portainer",
     "docker:status": "docker-compose ps",
     "docker:logs": "docker-compose logs -f",
-    
     "build": "tsc",
     "start": "node dist/index.js",
-    
     "test": "jest",
-    "test:integration": "jest tests/integration --testTimeout=60000",
+    "test:unit": "jest --testPathPattern=\"\\.test\\.(ts|js)$\"",
+    "test:integration": "node tests/integration-test.js",
+    "test:scenarios": "node tests/scenarios/demo.ts",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:scenarios && npm run test:performance",
     "test:coverage": "jest --coverage",
-    
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --coverage --testTimeout=30000",
     "setup": "node scripts/development/docker-quick-start.js",
+    "quick-start": "docker-compose up -d --build && echo 'System starting... Run: node scripts/test-integration.js'",
     "health-check": "node scripts/utilities/check-system-status.js",
     "clean": "rm -rf dist logs/*.log data/*.db",
-    
     "demo": "node scripts/utilities/comprehensive-demo.js",
     "demo:auto": "node -e \"const demo = require('./scripts/utilities/comprehensive-demo.js'); const CONFIG = require('./scripts/utilities/comprehensive-demo.js').CONFIG; CONFIG.demo.autoAdvance = true; new demo().runDemo();\"",
-    "test:performance": "node scripts/testing/performance-test.js",
-    "dev:outsourcing": "nodemon --exec \"npx ts-node --transpile-only\" src/services/outsourcing/index.ts"
+    "test:performance": "node scripts/testing/performance-test.js"
   },
   "dependencies": {
     "@types/node": "^22.15.3",

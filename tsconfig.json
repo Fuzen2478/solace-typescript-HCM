@@ -12,6 +12,10 @@
     "declaration": true,
     "outDir": "./dist"
   },
+  "paths": {
+    "@/*": ["src/*"],
+    "@tests/*": ["tests/*"]
+  },
   "ts-node": {
     "compilerOptions": {
       "strict": false,

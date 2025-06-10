@@ -370,6 +370,241 @@ class VerificationEngine {
       };
     }
   }
+
+  // Real-time verification methods
+  static async verifyCertificationRealTime(certification: any): Promise<{
+    verified: boolean;
+    score: number;
+    confidence: number;
+    issues: string[];
+    recommendations: string[];
+  }> {
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    let score = 0;
+    
+    // Check required fields
+    if (!certification.issuer) {
+      issues.push('Missing issuer information');
+    } else {
+      score += 20;
+    }
+    
+    if (!certification.issueDate) {
+      issues.push('Missing issue date');
+    } else if (new Date(certification.issueDate) > new Date()) {
+      issues.push('Issue date is in the future');
+    } else {
+      score += 20;
+    }
+    
+    // Check expiry
+    if (certification.expiryDate) {
+      if (new Date(certification.expiryDate) < new Date()) {
+        issues.push('Certification has expired');
+      } else {
+        score += 20;
+      }
+    } else {
+      score += 20; // No expiry is fine
+    }
+    
+    // Check trusted issuers
+    const trustedIssuers = ['AWS', 'Microsoft', 'Google', 'Oracle', 'IBM', 'Cisco', 'CompTIA'];
+    const isTrusted = trustedIssuers.some(issuer => 
+      certification.issuer?.toLowerCase().includes(issuer.toLowerCase())
+    );
+    
+    if (isTrusted) {
+      score += 30;
+      recommendations.push('Certification from trusted issuer');
+    } else {
+      recommendations.push('Consider getting certifications from well-known providers');
+    }
+    
+    // Check verification hash
+    if (certification.verificationHash && certification.verificationHash.length === 64) {
+      score += 10;
+    } else {
+      issues.push('Invalid or missing verification hash');
+    }
+    
+    const confidence = Math.min(100, score + (issues.length === 0 ? 20 : 0));
+    
+    return {
+      verified: score >= 60 && issues.length === 0,
+      score,
+      confidence,
+      issues,
+      recommendations
+    };
+  }
+  
+  static async verifyWorkHistoryRealTime(workHistory: any): Promise<{
+    verified: boolean;
+    score: number;
+    confidence: number;
+    issues: string[];
+    recommendations: string[];
+  }> {
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    let score = 0;
+    
+    // Check required fields
+    if (!workHistory.company) {
+      issues.push('Missing company information');
+    } else {
+      score += 20;
+    }
+    
+    if (!workHistory.position) {
+      issues.push('Missing position information');
+    } else {
+      score += 20;
+    }
+    
+    if (!workHistory.startDate) {
+      issues.push('Missing start date');
+    } else {
+      score += 15;
+    }
+    
+    // Check duration consistency
+    if (workHistory.startDate && workHistory.endDate) {
+      const start = new Date(workHistory.startDate);
+      const end = new Date(workHistory.endDate);
+      const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30); // months
+      
+      if (duration < 1) {
+        issues.push('Very short employment duration');
+      } else if (duration >= 12) {
+        score += 15;
+        recommendations.push('Long-term employment shows stability');
+      }
+    }
+    
+    // Check for achievements and details
+    if (workHistory.achievements && workHistory.achievements.length > 0) {
+      score += 15;
+      recommendations.push('Well-documented achievements');
+    } else {
+      recommendations.push('Add specific achievements and accomplishments');
+    }
+    
+    // Check skills documentation
+    if (workHistory.skills && workHistory.skills.length > 0) {
+      score += 10;
+    } else {
+      recommendations.push('Document skills used in this role');
+    }
+    
+    // Check verification status
+    if (workHistory.verifiedBy) {
+      score += 5;
+    } else {
+      recommendations.push('Obtain verification from former supervisor or HR');
+    }
+    
+    const confidence = Math.min(100, score + (issues.length === 0 ? 15 : 0));
+    
+    return {
+      verified: score >= 70 && issues.length === 0,
+      score,
+      confidence,
+      issues,
+      recommendations
+    };
+  }
+  
+  static async verifySkillAssessmentRealTime(assessment: any): Promise<{
+    verified: boolean;
+    score: number;
+    confidence: number;
+    issues: string[];
+    recommendations: string[];
+  }> {
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    let score = 0;
+    
+    // Check required fields
+    if (!assessment.skillName) {
+      issues.push('Missing skill name');
+    } else {
+      score += 20;
+    }
+    
+    if (assessment.score === undefined || assessment.score === null) {
+      issues.push('Missing assessment score');
+    } else if (assessment.score < 0 || assessment.score > 100) {
+      issues.push('Invalid score range');
+    } else {
+      score += 25;
+      
+      if (assessment.score >= 80) {
+        recommendations.push('Excellent skill level demonstrated');
+      } else if (assessment.score >= 60) {
+        recommendations.push('Good skill level, consider advanced training');
+      } else {
+        recommendations.push('Skill needs improvement, recommend training');
+      }
+    }
+    
+    if (!assessment.assessmentType) {
+      issues.push('Missing assessment type');
+    } else {
+      score += 15;
+    }
+    
+    if (!assessment.assessedBy) {
+      issues.push('Missing assessor information');
+    } else {
+      score += 15;
+    }
+    
+    // Check assessment date
+    if (!assessment.assessmentDate) {
+      issues.push('Missing assessment date');
+    } else {
+      const assessmentAge = Date.now() - new Date(assessment.assessmentDate).getTime();
+      const ageInDays = assessmentAge / (1000 * 60 * 60 * 24);
+      
+      if (ageInDays > 365) {
+        issues.push('Assessment is over 1 year old');
+        recommendations.push('Consider taking a recent assessment');
+      } else {
+        score += 10;
+      }
+    }
+    
+    // Check for evidence
+    if (assessment.evidence && assessment.evidence.length > 0) {
+      score += 10;
+      recommendations.push('Well-documented with evidence');
+    } else {
+      recommendations.push('Add supporting evidence or documentation');
+    }
+    
+    // Check validity period
+    if (assessment.validUntil) {
+      if (new Date(assessment.validUntil) < new Date()) {
+        issues.push('Assessment validity has expired');
+      } else {
+        score += 5;
+      }
+    }
+    
+    const confidence = Math.min(100, score + (issues.length === 0 ? 10 : 0));
+    
+    return {
+      verified: score >= 70 && issues.length === 0,
+      score,
+      confidence,
+      issues,
+      recommendations
+    };
+  }
 }
 
 // API Routes
@@ -785,6 +1020,139 @@ app.get('/analytics/verification', async (req, res) => {
     res.status(500).json({ error: 'Failed to get analytics' });
   } finally {
     await session.close();
+  }
+});
+
+// Real-time verification check
+app.post('/verify/real-time', async (req, res) => {
+  try {
+    const { type, data, employeeId } = req.body;
+    
+    if (!type || !data || !employeeId) {
+      return res.status(400).json({ error: 'Type, data, and employeeId required' });
+    }
+    
+    let verificationResult;
+    
+    switch (type) {
+      case 'certification':
+        verificationResult = await VerificationEngine.verifyCertificationRealTime(data);
+        break;
+      case 'work_history':
+        verificationResult = await VerificationEngine.verifyWorkHistoryRealTime(data);
+        break;
+      case 'skill_assessment':
+        verificationResult = await VerificationEngine.verifySkillAssessmentRealTime(data);
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid verification type' });
+    }
+    
+    res.json({
+      employeeId,
+      type,
+      verificationResult,
+      timestamp: new Date()
+    });
+    
+  } catch (error) {
+    logger.error('Error in real-time verification:', error);
+    res.status(500).json({ error: 'Failed to perform real-time verification' });
+  }
+});
+
+// Batch verification
+app.post('/verify/batch', async (req, res) => {
+  try {
+    const { items } = req.body; // Array of {type, data, employeeId}
+    
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array required' });
+    }
+    
+    const results = [];
+    
+    for (const item of items) {
+      try {
+        let verificationResult;
+        
+        switch (item.type) {
+          case 'certification':
+            verificationResult = await VerificationEngine.verifyCertificationRealTime(item.data);
+            break;
+          case 'work_history':
+            verificationResult = await VerificationEngine.verifyWorkHistoryRealTime(item.data);
+            break;
+          case 'skill_assessment':
+            verificationResult = await VerificationEngine.verifySkillAssessmentRealTime(item.data);
+            break;
+          default:
+            verificationResult = { verified: false, error: 'Invalid type' };
+        }
+        
+        results.push({
+          employeeId: item.employeeId,
+          type: item.type,
+          verificationResult,
+          status: 'completed'
+        });
+        
+      } catch (error: any) {
+        results.push({
+          employeeId: item.employeeId,
+          type: item.type,
+          verificationResult: { verified: false, error: error.message },
+          status: 'failed'
+        });
+      }
+    }
+    
+    res.json({
+      totalItems: items.length,
+      completedItems: results.filter(r => r.status === 'completed').length,
+      failedItems: results.filter(r => r.status === 'failed').length,
+      results,
+      timestamp: new Date()
+    });
+    
+  } catch (error) {
+    logger.error('Error in batch verification:', error);
+    res.status(500).json({ error: 'Failed to perform batch verification' });
+  }
+});
+
+// Get verification queue status
+app.get('/queue/status', async (req, res) => {
+  try {
+    const session = neo4jDriver.session();
+    
+    const queueStats = await session.run(`
+      MATCH (vr:VerificationRequest)
+      RETURN 
+        count(CASE WHEN vr.status = 'pending' THEN 1 END) as pending,
+        count(CASE WHEN vr.status = 'in_progress' THEN 1 END) as inProgress,
+        count(CASE WHEN vr.status = 'completed' THEN 1 END) as completed,
+        count(CASE WHEN vr.priority = 'urgent' AND vr.status = 'pending' THEN 1 END) as urgent
+    `);
+    
+    const stats = queueStats.records[0];
+    
+    await session.close();
+    
+    res.json({
+      queue: {
+        pending: stats.get('pending').toNumber(),
+        inProgress: stats.get('inProgress').toNumber(),
+        completed: stats.get('completed').toNumber(),
+        urgent: stats.get('urgent').toNumber()
+      },
+      estimatedProcessingTime: '15-30 minutes',
+      timestamp: new Date()
+    });
+    
+  } catch (error) {
+    logger.error('Error getting queue status:', error);
+    res.status(500).json({ error: 'Failed to get queue status' });
   }
 });
 

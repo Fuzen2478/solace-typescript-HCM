@@ -1,13 +1,13 @@
-import express from 'express';
-import Redis from 'ioredis';
-import { v4 as uuidv4 } from 'uuid';
-import winston from 'winston';
-import dotenv from 'dotenv';
-import WebSocket from 'ws';
-import cron from 'node-cron';
 import os from 'os';
 import axios from 'axios';
-import { CRDTManager, Employee, Assignment } from './crdt-manager';
+import dotenv from 'dotenv';
+import express from 'express';
+import Redis from 'ioredis';
+import cron from 'node-cron';
+import { v4 as uuidv4 } from 'uuid';
+import winston from 'winston';
+import WebSocket from 'ws';
+import { Assignment, CRDTManager, Employee } from './crdt-manager';
 
 dotenv.config();
 
@@ -17,18 +17,21 @@ const logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
-    winston.format.json()
+    winston.format.json(),
   ),
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(
         winston.format.colorize(),
-        winston.format.simple()
-      )
+        winston.format.simple(),
+      ),
     }),
     new winston.transports.File({ filename: 'edge-agent.log' }),
-    new winston.transports.File({ filename: 'edge-agent-error.log', level: 'error' })
-  ]
+    new winston.transports.File({
+      filename: 'edge-agent-error.log',
+      level: 'error',
+    }),
+  ],
 });
 
 // Express app
@@ -40,7 +43,7 @@ const redis = new Redis({
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT!) || 6379,
   retryDelayOnFailure: 100,
-  retryTimes: 3
+  retryTimes: 3,
 });
 
 // WebSocket server for real-time communication
@@ -57,7 +60,13 @@ const crdtManager = new CRDTManager(redis, AGENT_ID, CLUSTER_NAME);
 // Interfaces
 interface DistributedTask {
   id: string;
-  type: 'data_sync' | 'health_check' | 'backup' | 'notification' | 'analytics' | 'cleanup';
+  type:
+    | 'data_sync'
+    | 'health_check'
+    | 'backup'
+    | 'notification'
+    | 'analytics'
+    | 'cleanup';
   payload: any;
   priority: number; // 1-10 (10 highest)
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -101,12 +110,14 @@ interface ClusterState {
 
 // Task execution engine
 class TaskExecutor {
-  static async executeTask(task: DistributedTask): Promise<{ success: boolean; result?: any; error?: string }> {
+  static async executeTask(
+    task: DistributedTask,
+  ): Promise<{ success: boolean; result?: any; error?: string }> {
     logger.info(`Executing task ${task.id} of type ${task.type}`);
-    
+
     try {
       let result: any;
-      
+
       switch (task.type) {
         case 'health_check':
           result = await this.executeHealthCheck(task.payload);
@@ -129,23 +140,23 @@ class TaskExecutor {
         default:
           throw new Error(`Unknown task type: ${task.type}`);
       }
-      
+
       return { success: true, result };
     } catch (error: any) {
       logger.error(`Task ${task.id} failed:`, error);
       return { success: false, error: error.message };
     }
   }
-  
+
   private static async executeHealthCheck(payload: any): Promise<any> {
     const services = payload.services || [
       'http://localhost:3001/health', // HR Service
       'http://localhost:3002/health', // Matching Engine
-      'http://localhost:3003/health'  // Verification Service
+      'http://localhost:3003/health', // Verification Service
     ];
-    
+
     const results = [];
-    
+
     for (const serviceUrl of services) {
       try {
         const response = await axios.get(serviceUrl, { timeout: 5000 });
@@ -153,29 +164,33 @@ class TaskExecutor {
           service: serviceUrl,
           status: 'healthy',
           responseTime: response.headers['response-time'] || 'unknown',
-          data: response.data
+          data: response.data,
         });
       } catch (error: any) {
         results.push({
           service: serviceUrl,
           status: 'unhealthy',
-          error: error.message
+          error: error.message,
         });
       }
     }
-    
+
     return {
       timestamp: new Date(),
       services: results,
-      overallHealth: results.every(r => r.status === 'healthy') ? 'healthy' : 'degraded'
+      overallHealth: results.every((r) => r.status === 'healthy')
+        ? 'healthy'
+        : 'degraded',
     };
   }
-  
+
   private static async executeDataSync(payload: any): Promise<any> {
     const { sourceService, targetService, dataType, docId } = payload;
-    
-    logger.info(`Syncing ${dataType} from ${sourceService} to ${targetService}`);
-    
+
+    logger.info(
+      `Syncing ${dataType} from ${sourceService} to ${targetService}`,
+    );
+
     try {
       if (docId) {
         // CRDT-based synchronization
@@ -184,18 +199,18 @@ class TaskExecutor {
           crdtManager.initializeDocument(docId);
           logger.info(`Initialized new CRDT document: ${docId}`);
         }
-        
+
         // Sync with cluster peers
         const agents = await AgentManager.getClusterAgents();
         let syncedPeers = 0;
-        
+
         for (const agent of agents) {
           if (agent.id !== AGENT_ID) {
             const synced = await crdtManager.syncWithPeer(docId, agent.id);
             if (synced) syncedPeers++;
           }
         }
-        
+
         return {
           synced: true,
           docId,
@@ -204,17 +219,17 @@ class TaskExecutor {
           timestamp: new Date(),
           crdtData: {
             employees: Object.keys(crdtManager.getEmployees(docId)).length,
-            assignments: Object.keys(crdtManager.getAssignments(docId)).length
-          }
+            assignments: Object.keys(crdtManager.getAssignments(docId)).length,
+          },
         };
       } else {
         // Traditional synchronization
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
         return {
           synced: true,
           recordsProcessed: Math.floor(Math.random() * 1000) + 100,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
       }
     } catch (error: any) {
@@ -222,70 +237,76 @@ class TaskExecutor {
       throw error;
     }
   }
-  
+
   private static async executeBackup(payload: any): Promise<any> {
     const { databases, destination } = payload;
-    
+
     logger.info(`Starting backup to ${destination}`);
-    
+
     // Simulate backup process
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     return {
       backupId: uuidv4(),
       databases: databases || ['neo4j', 'redis'],
       destination,
       size: `${Math.floor(Math.random() * 500) + 100}MB`,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
-  
+
   private static async executeNotification(payload: any): Promise<any> {
     const { type, recipients, message, priority } = payload;
-    
-    logger.info(`Sending ${type} notification to ${recipients?.length || 0} recipients`);
-    
+
+    logger.info(
+      `Sending ${type} notification to ${recipients?.length || 0} recipients`,
+    );
+
     // In real implementation, this would send actual notifications
     // (email, Slack, SMS, etc.)
-    
+
     return {
       sent: true,
       type,
       recipients: recipients?.length || 0,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
-  
+
   private static async executeAnalytics(payload: any): Promise<any> {
     const { metrics, timeRange } = payload;
-    
+
     logger.info(`Generating analytics for metrics: ${metrics?.join(', ')}`);
-    
+
     // Simulate analytics processing
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
     return {
-      metrics: metrics || ['system_performance', 'task_completion', 'service_health'],
+      metrics: metrics || [
+        'system_performance',
+        'task_completion',
+        'service_health',
+      ],
       timeRange: timeRange || '24h',
       generatedAt: new Date(),
-      reportUrl: `/reports/${uuidv4()}`
+      reportUrl: `/reports/${uuidv4()}`,
     };
   }
-  
+
   private static async executeCleanup(payload: any): Promise<any> {
     const { targets, maxAge } = payload;
-    
+
     logger.info(`Running cleanup for targets: ${targets?.join(', ')}`);
-    
+
     // Simulate cleanup process
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
     return {
       cleaned: true,
       targets: targets || ['temp_files', 'old_logs', 'cache'],
       itemsRemoved: Math.floor(Math.random() * 100) + 10,
       spaceSaved: `${Math.floor(Math.random() * 50) + 5}MB`,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
 }
@@ -295,61 +316,74 @@ class AgentManager {
   private static clusterState: ClusterState = {
     agents: new Map(),
     tasks: new Map(),
-    lastUpdate: new Date()
+    lastUpdate: new Date(),
   };
-  
+
   static async registerAgent(): Promise<void> {
     const agentState: AgentState = {
       id: AGENT_ID,
       hostname: os.hostname(),
       status: 'active',
       lastHeartbeat: new Date(),
-      capabilities: ['task_execution', 'health_monitoring', 'data_sync', 'backup'],
+      capabilities: [
+        'task_execution',
+        'health_monitoring',
+        'data_sync',
+        'backup',
+      ],
       currentLoad: await this.collectSystemMetrics(),
       activeTasks: [],
       completedTasks: 0,
       failedTasks: 0,
       uptime: process.uptime(),
-      version: '1.0.0'
+      version: '1.0.0',
     };
-    
+
     this.clusterState.agents.set(AGENT_ID, agentState);
-    
+
     // Register in Redis for cluster coordination
-    await redis.hset(`cluster:${CLUSTER_NAME}:agents`, AGENT_ID, JSON.stringify(agentState));
-    
+    await redis.hset(
+      `cluster:${CLUSTER_NAME}:agents`,
+      AGENT_ID,
+      JSON.stringify(agentState),
+    );
+
     logger.info(`Agent ${AGENT_ID} registered in cluster ${CLUSTER_NAME}`);
   }
-  
+
   static async updateHeartbeat(): Promise<void> {
     const agent = this.clusterState.agents.get(AGENT_ID);
     if (agent) {
       agent.lastHeartbeat = new Date();
       agent.currentLoad = await this.collectSystemMetrics();
       agent.uptime = process.uptime();
-      
-      await redis.hset(`cluster:${CLUSTER_NAME}:agents`, AGENT_ID, JSON.stringify(agent));
+
+      await redis.hset(
+        `cluster:${CLUSTER_NAME}:agents`,
+        AGENT_ID,
+        JSON.stringify(agent),
+      );
     }
   }
-  
+
   static async collectSystemMetrics(): Promise<SystemLoad> {
     const cpuUsage = process.cpuUsage();
     const memUsage = process.memoryUsage();
-    
+
     return {
       cpu: Math.min(100, (cpuUsage.user + cpuUsage.system) / 1000000 / 10), // Rough estimate
       memory: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
       disk: Math.floor(Math.random() * 30) + 10, // Simulated
       networkLatency: Math.floor(Math.random() * 10) + 1,
-      activeConnections: wss.clients.size
+      activeConnections: wss.clients.size,
     };
   }
-  
+
   static async getClusterAgents(): Promise<AgentState[]> {
     try {
       const agentData = await redis.hgetall(`cluster:${CLUSTER_NAME}:agents`);
       const agents: AgentState[] = [];
-      
+
       for (const [agentId, data] of Object.entries(agentData)) {
         try {
           const agent = JSON.parse(data);
@@ -359,32 +393,32 @@ class AgentManager {
           logger.warn(`Failed to parse agent data for ${agentId}:`, error);
         }
       }
-      
+
       return agents;
     } catch (error) {
       logger.error('Error getting cluster agents:', error);
       return [];
     }
   }
-  
+
   static async findBestAgent(task: DistributedTask): Promise<string | null> {
     const agents = await this.getClusterAgents();
-    const activeAgents = agents.filter(agent => {
+    const activeAgents = agents.filter((agent) => {
       const heartbeatAge = Date.now() - new Date(agent.lastHeartbeat).getTime();
       return agent.status === 'active' && heartbeatAge < 60000; // Active within last minute
     });
-    
+
     if (activeAgents.length === 0) {
       return null;
     }
-    
+
     // Sort by load (CPU + memory) and select least loaded
     activeAgents.sort((a, b) => {
       const loadA = a.currentLoad.cpu + a.currentLoad.memory;
       const loadB = b.currentLoad.cpu + b.currentLoad.memory;
       return loadA - loadB;
     });
-    
+
     return activeAgents[0].id;
   }
 }
@@ -393,47 +427,64 @@ class AgentManager {
 class TaskQueue {
   static async addTask(task: DistributedTask): Promise<void> {
     task.createdAt = new Date();
-    
+
     // Find best agent for the task
     const bestAgent = await AgentManager.findBestAgent(task);
     if (bestAgent) {
       task.assignedAgent = bestAgent;
     }
-    
+
     // Store task in Redis
-    await redis.hset(`cluster:${CLUSTER_NAME}:tasks`, task.id, JSON.stringify(task));
-    
+    await redis.hset(
+      `cluster:${CLUSTER_NAME}:tasks`,
+      task.id,
+      JSON.stringify(task),
+    );
+
     // Notify assigned agent if different from current
     if (bestAgent && bestAgent !== AGENT_ID) {
-      await redis.publish(`agent:${bestAgent}:tasks`, JSON.stringify({
-        type: 'task_assigned',
-        task
-      }));
+      await redis.publish(
+        `agent:${bestAgent}:tasks`,
+        JSON.stringify({
+          type: 'task_assigned',
+          task,
+        }),
+      );
     } else if (!bestAgent || bestAgent === AGENT_ID) {
       // Execute locally
       this.executeTaskAsync(task);
     }
-    
-    logger.info(`Task ${task.id} added to queue, assigned to ${bestAgent || 'local'}`);
+
+    logger.info(
+      `Task ${task.id} added to queue, assigned to ${bestAgent || 'local'}`,
+    );
   }
-  
+
   static async executeTaskAsync(task: DistributedTask): Promise<void> {
     // Execute task asynchronously
     setImmediate(async () => {
       try {
         task.status = 'running';
         task.startedAt = new Date();
-        await redis.hset(`cluster:${CLUSTER_NAME}:tasks`, task.id, JSON.stringify(task));
-        
+        await redis.hset(
+          `cluster:${CLUSTER_NAME}:tasks`,
+          task.id,
+          JSON.stringify(task),
+        );
+
         const result = await TaskExecutor.executeTask(task);
-        
+
         task.status = result.success ? 'completed' : 'failed';
         task.completedAt = new Date();
         task.result = result.result;
         task.error = result.error;
-        
-        await redis.hset(`cluster:${CLUSTER_NAME}:tasks`, task.id, JSON.stringify(task));
-        
+
+        await redis.hset(
+          `cluster:${CLUSTER_NAME}:tasks`,
+          task.id,
+          JSON.stringify(task),
+        );
+
         // Update agent stats
         const agent = AgentManager['clusterState'].agents.get(AGENT_ID);
         if (agent) {
@@ -442,32 +493,41 @@ class TaskQueue {
           } else {
             agent.failedTasks++;
           }
-          agent.activeTasks = agent.activeTasks.filter(t => t !== task.id);
+          agent.activeTasks = agent.activeTasks.filter((t) => t !== task.id);
         }
-        
-        logger.info(`Task ${task.id} ${result.success ? 'completed' : 'failed'}`);
-        
+
+        logger.info(
+          `Task ${task.id} ${result.success ? 'completed' : 'failed'}`,
+        );
       } catch (error) {
         logger.error(`Error executing task ${task.id}:`, error);
         task.status = 'failed';
         task.error = error instanceof Error ? error.message : 'Unknown error';
-        await redis.hset(`cluster:${CLUSTER_NAME}:tasks`, task.id, JSON.stringify(task));
+        await redis.hset(
+          `cluster:${CLUSTER_NAME}:tasks`,
+          task.id,
+          JSON.stringify(task),
+        );
       }
     });
   }
-  
+
   static async getTasks(status?: string): Promise<DistributedTask[]> {
     try {
       const taskData = await redis.hgetall(`cluster:${CLUSTER_NAME}:tasks`);
       const tasks: DistributedTask[] = [];
-      
+
       for (const [taskId, data] of Object.entries(taskData)) {
         try {
           const task = JSON.parse(data);
           task.createdAt = new Date(task.createdAt);
-          task.startedAt = task.startedAt ? new Date(task.startedAt) : undefined;
-          task.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
-          
+          task.startedAt = task.startedAt
+            ? new Date(task.startedAt)
+            : undefined;
+          task.completedAt = task.completedAt
+            ? new Date(task.completedAt)
+            : undefined;
+
           if (!status || task.status === status) {
             tasks.push(task);
           }
@@ -475,8 +535,10 @@ class TaskQueue {
           logger.warn(`Failed to parse task data for ${taskId}:`, error);
         }
       }
-      
-      return tasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      return tasks.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      );
     } catch (error) {
       logger.error('Error getting tasks:', error);
       return [];
@@ -488,18 +550,20 @@ class TaskQueue {
 wss.on('connection', (ws, req) => {
   const clientId = req.url?.split('?clientId=')[1] || uuidv4();
   logger.info(`WebSocket client connected: ${clientId}`);
-  
+
   // Send current agent status
-  ws.send(JSON.stringify({
-    type: 'agent_status',
-    data: {
-      agentId: AGENT_ID,
-      status: 'active',
-      uptime: process.uptime(),
-      timestamp: new Date()
-    }
-  }));
-  
+  ws.send(
+    JSON.stringify({
+      type: 'agent_status',
+      data: {
+        agentId: AGENT_ID,
+        status: 'active',
+        uptime: process.uptime(),
+        timestamp: new Date(),
+      },
+    }),
+  );
+
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message.toString());
@@ -508,11 +572,11 @@ wss.on('connection', (ws, req) => {
       logger.error('Invalid WebSocket message:', error);
     }
   });
-  
+
   ws.on('close', () => {
     logger.info(`WebSocket client disconnected: ${clientId}`);
   });
-  
+
   ws.on('error', (error) => {
     logger.error(`WebSocket error for client ${clientId}:`, error);
   });
@@ -523,51 +587,59 @@ const handleWebSocketMessage = async (ws: WebSocket, data: any) => {
     case 'get_status':
       const agents = await AgentManager.getClusterAgents();
       const tasks = await TaskQueue.getTasks();
-      ws.send(JSON.stringify({
-        type: 'status_response',
-        data: {
-          agents,
-          tasks: tasks.slice(0, 10), // Last 10 tasks
-          clusterName: CLUSTER_NAME,
-          timestamp: new Date()
-        }
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'status_response',
+          data: {
+            agents,
+            tasks: tasks.slice(0, 10), // Last 10 tasks
+            clusterName: CLUSTER_NAME,
+            timestamp: new Date(),
+          },
+        }),
+      );
       break;
-      
+
     case 'submit_task':
       const task: DistributedTask = {
         id: uuidv4(),
         status: 'pending',
         retryCount: 0,
         maxRetries: 3,
-        ...data.payload
+        ...data.payload,
       };
-      
+
       await TaskQueue.addTask(task);
-      ws.send(JSON.stringify({
-        type: 'task_submitted',
-        data: { taskId: task.id, status: 'pending' }
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'task_submitted',
+          data: { taskId: task.id, status: 'pending' },
+        }),
+      );
       break;
-      
+
     case 'get_metrics':
       const metrics = await AgentManager.collectSystemMetrics();
-      ws.send(JSON.stringify({
-        type: 'metrics_response',
-        data: {
-          agentId: AGENT_ID,
-          metrics,
-          timestamp: new Date()
-        }
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'metrics_response',
+          data: {
+            agentId: AGENT_ID,
+            metrics,
+            timestamp: new Date(),
+          },
+        }),
+      );
       break;
-      
+
     default:
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Unknown message type',
-        timestamp: new Date()
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'error',
+          message: 'Unknown message type',
+          timestamp: new Date(),
+        }),
+      );
   }
 };
 
@@ -582,9 +654,9 @@ app.get('/health', (req, res) => {
     timestamp: new Date(),
     services: {
       redis: redis.status,
-      websocket: `${wss.clients.size} clients connected`
+      websocket: `${wss.clients.size} clients connected`,
     },
-    version: '1.0.0'
+    version: '1.0.0',
   });
 });
 
@@ -594,22 +666,22 @@ app.get('/status', async (req, res) => {
     const agents = await AgentManager.getClusterAgents();
     const tasks = await TaskQueue.getTasks();
     const metrics = await AgentManager.collectSystemMetrics();
-    
+
     res.json({
       agentId: AGENT_ID,
       cluster: CLUSTER_NAME,
       agents,
       tasks: {
         total: tasks.length,
-        pending: tasks.filter(t => t.status === 'pending').length,
-        running: tasks.filter(t => t.status === 'running').length,
-        completed: tasks.filter(t => t.status === 'completed').length,
-        failed: tasks.filter(t => t.status === 'failed').length,
-        recent: tasks.slice(0, 5)
+        pending: tasks.filter((t) => t.status === 'pending').length,
+        running: tasks.filter((t) => t.status === 'running').length,
+        completed: tasks.filter((t) => t.status === 'completed').length,
+        failed: tasks.filter((t) => t.status === 'failed').length,
+        recent: tasks.slice(0, 5),
       },
       metrics,
       uptime: process.uptime(),
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   } catch (error) {
     logger.error('Error getting status:', error);
@@ -627,21 +699,31 @@ app.post('/tasks', async (req, res) => {
       maxRetries: 3,
       priority: 5,
       createdAt: new Date(),
-      ...req.body
+      ...req.body,
     };
-    
+
     // Validate task
-    if (!task.type || !['data_sync', 'health_check', 'backup', 'notification', 'analytics', 'cleanup'].includes(task.type)) {
+    if (
+      !task.type ||
+      ![
+        'data_sync',
+        'health_check',
+        'backup',
+        'notification',
+        'analytics',
+        'cleanup',
+      ].includes(task.type)
+    ) {
       return res.status(400).json({ error: 'Invalid task type' });
     }
-    
+
     await TaskQueue.addTask(task);
-    
+
     res.status(201).json({
       taskId: task.id,
       status: 'submitted',
       assignedAgent: task.assignedAgent,
-      message: 'Task submitted successfully'
+      message: 'Task submitted successfully',
     });
   } catch (error) {
     logger.error('Error submitting task:', error);
@@ -652,18 +734,20 @@ app.post('/tasks', async (req, res) => {
 // Get task status
 app.get('/tasks/:taskId', async (req, res) => {
   const { taskId } = req.params;
-  
+
   try {
     const taskData = await redis.hget(`cluster:${CLUSTER_NAME}:tasks`, taskId);
     if (!taskData) {
       return res.status(404).json({ error: 'Task not found' });
     }
-    
+
     const task = JSON.parse(taskData);
     task.createdAt = new Date(task.createdAt);
     task.startedAt = task.startedAt ? new Date(task.startedAt) : undefined;
-    task.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
-    
+    task.completedAt = task.completedAt
+      ? new Date(task.completedAt)
+      : undefined;
+
     res.json(task);
   } catch (error) {
     logger.error('Error getting task:', error);
@@ -674,13 +758,13 @@ app.get('/tasks/:taskId', async (req, res) => {
 // Get all tasks
 app.get('/tasks', async (req, res) => {
   const { status, limit = 50 } = req.query;
-  
+
   try {
     const tasks = await TaskQueue.getTasks(status as string);
     res.json({
       tasks: tasks.slice(0, parseInt(limit.toString())),
       total: tasks.length,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   } catch (error) {
     logger.error('Error getting tasks:', error);
@@ -695,7 +779,7 @@ app.get('/agents', async (req, res) => {
     res.json({
       agents,
       cluster: CLUSTER_NAME,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   } catch (error) {
     logger.error('Error getting agents:', error);
@@ -711,7 +795,7 @@ app.get('/metrics', async (req, res) => {
       agentId: AGENT_ID,
       metrics,
       uptime: process.uptime(),
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   } catch (error) {
     logger.error('Error getting metrics:', error);
@@ -730,18 +814,276 @@ app.post('/health-check', async (req, res) => {
       status: 'pending',
       retryCount: 0,
       maxRetries: 1,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
-    
+
     await TaskQueue.addTask(task);
-    
+
     res.json({
       taskId: task.id,
-      message: 'Health check initiated'
+      message: 'Health check initiated',
     });
   } catch (error) {
     logger.error('Error triggering health check:', error);
     res.status(500).json({ error: 'Failed to trigger health check' });
+  }
+});
+
+// CRDT Document Management APIs
+
+// Initialize CRDT document
+app.post('/crdt/documents', (req, res) => {
+  try {
+    const { docId, initialData } = req.body;
+    
+    if (!docId) {
+      return res.status(400).json({ error: 'Document ID required' });
+    }
+    
+    crdtManager.initializeDocument(docId, initialData);
+    
+    res.status(201).json({
+      docId,
+      message: 'CRDT document initialized',
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error initializing CRDT document:', error);
+    res.status(500).json({ error: 'Failed to initialize document' });
+  }
+});
+
+// Get CRDT document
+app.get('/crdt/documents/:docId', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const doc = crdtManager.getDocument(docId);
+    
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    res.json({
+      docId,
+      document: doc,
+      syncStatus: crdtManager.getSyncStatus(docId),
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error getting CRDT document:', error);
+    res.status(500).json({ error: 'Failed to get document' });
+  }
+});
+
+// Add employee to CRDT document
+app.post('/crdt/documents/:docId/employees', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const employee = req.body;
+    
+    if (!employee.id || !employee.name || !employee.email) {
+      return res.status(400).json({ error: 'Employee id, name, and email required' });
+    }
+    
+    employee.lastUpdated = new Date().toISOString();
+    employee.availability = employee.availability || 'available';
+    
+    const success = crdtManager.addEmployee(docId, employee);
+    
+    if (success) {
+      res.status(201).json({
+        docId,
+        employee,
+        message: 'Employee added to CRDT document',
+        timestamp: new Date()
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to add employee' });
+    }
+  } catch (error) {
+    logger.error('Error adding employee to CRDT:', error);
+    res.status(500).json({ error: 'Failed to add employee' });
+  }
+});
+
+// Update employee availability
+app.patch('/crdt/documents/:docId/employees/:employeeId/availability', (req, res) => {
+  try {
+    const { docId, employeeId } = req.params;
+    const { availability } = req.body;
+    
+    if (!['available', 'busy', 'offline'].includes(availability)) {
+      return res.status(400).json({ error: 'Invalid availability status' });
+    }
+    
+    const success = crdtManager.updateEmployeeAvailability(docId, employeeId, availability);
+    
+    if (success) {
+      res.json({
+        docId,
+        employeeId,
+        availability,
+        message: 'Employee availability updated',
+        timestamp: new Date()
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to update availability' });
+    }
+  } catch (error) {
+    logger.error('Error updating employee availability:', error);
+    res.status(500).json({ error: 'Failed to update availability' });
+  }
+});
+
+// Create assignment
+app.post('/crdt/documents/:docId/assignments', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const assignment = {
+      id: uuidv4(),
+      assignedAt: new Date().toISOString(),
+      status: 'pending',
+      ...req.body
+    };
+    
+    if (!assignment.employeeId || !assignment.taskType) {
+      return res.status(400).json({ error: 'Employee ID and task type required' });
+    }
+    
+    const success = crdtManager.createAssignment(docId, assignment);
+    
+    if (success) {
+      res.status(201).json({
+        docId,
+        assignment,
+        message: 'Assignment created',
+        timestamp: new Date()
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to create assignment' });
+    }
+  } catch (error) {
+    logger.error('Error creating assignment:', error);
+    res.status(500).json({ error: 'Failed to create assignment' });
+  }
+});
+
+// Complete assignment
+app.patch('/crdt/documents/:docId/assignments/:assignmentId/complete', (req, res) => {
+  try {
+    const { docId, assignmentId } = req.params;
+    
+    const success = crdtManager.completeAssignment(docId, assignmentId);
+    
+    if (success) {
+      res.json({
+        docId,
+        assignmentId,
+        message: 'Assignment completed',
+        timestamp: new Date()
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to complete assignment' });
+    }
+  } catch (error) {
+    logger.error('Error completing assignment:', error);
+    res.status(500).json({ error: 'Failed to complete assignment' });
+  }
+});
+
+// Get available employees from CRDT
+app.get('/crdt/documents/:docId/employees/available', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const availableEmployees = crdtManager.getAvailableEmployees(docId);
+    
+    res.json({
+      docId,
+      availableEmployees,
+      count: availableEmployees.length,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error getting available employees:', error);
+    res.status(500).json({ error: 'Failed to get available employees' });
+  }
+});
+
+// Get assignments from CRDT
+app.get('/crdt/documents/:docId/assignments', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const { status } = req.query;
+    const assignments = crdtManager.getAssignments(docId, status as string);
+    
+    res.json({
+      docId,
+      assignments,
+      count: Object.keys(assignments).length,
+      filterStatus: status || 'all',
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error getting assignments:', error);
+    res.status(500).json({ error: 'Failed to get assignments' });
+  }
+});
+
+// Sync CRDT document with peers
+app.post('/crdt/documents/:docId/sync', async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const { peerId } = req.body;
+    
+    if (peerId) {
+      // Sync with specific peer
+      const success = await crdtManager.syncWithPeer(docId, peerId);
+      res.json({
+        docId,
+        peerId,
+        synced: success,
+        message: success ? 'Synced successfully' : 'Sync failed',
+        timestamp: new Date()
+      });
+    } else {
+      // Sync with all peers
+      const agents = await AgentManager.getClusterAgents();
+      const syncResults = [];
+      
+      for (const agent of agents) {
+        if (agent.id !== AGENT_ID) {
+          const synced = await crdtManager.syncWithPeer(docId, agent.id);
+          syncResults.push({ peerId: agent.id, synced });
+        }
+      }
+      
+      res.json({
+        docId,
+        syncResults,
+        totalPeers: syncResults.length,
+        successfulSyncs: syncResults.filter(r => r.synced).length,
+        timestamp: new Date()
+      });
+    }
+  } catch (error) {
+    logger.error('Error syncing CRDT document:', error);
+    res.status(500).json({ error: 'Failed to sync document' });
+  }
+});
+
+// Get CRDT sync status
+app.get('/crdt/documents/:docId/sync-status', (req, res) => {
+  try {
+    const { docId } = req.params;
+    const syncStatus = crdtManager.getSyncStatus(docId);
+    
+    res.json({
+      ...syncStatus,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error getting sync status:', error);
+    res.status(500).json({ error: 'Failed to get sync status' });
   }
 });
 
@@ -750,7 +1092,7 @@ const initializeServices = async () => {
   try {
     await redis.ping();
     await AgentManager.registerAgent();
-    
+
     logger.info('All Edge Agent services initialized successfully');
   } catch (error) {
     logger.error('Error initializing services:', error);
@@ -771,17 +1113,19 @@ cron.schedule('*/30 * * * * *', async () => {
 cron.schedule('0 * * * *', async () => {
   try {
     const tasks = await TaskQueue.getTasks();
-    const cutoffTime = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
-    
-    const oldTasks = tasks.filter(task => 
-      (task.status === 'completed' || task.status === 'failed') &&
-      task.completedAt && task.completedAt.getTime() < cutoffTime
+    const cutoffTime = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+
+    const oldTasks = tasks.filter(
+      (task) =>
+        (task.status === 'completed' || task.status === 'failed') &&
+        task.completedAt &&
+        task.completedAt.getTime() < cutoffTime,
     );
-    
+
     for (const task of oldTasks) {
       await redis.hdel(`cluster:${CLUSTER_NAME}:tasks`, task.id);
     }
-    
+
     if (oldTasks.length > 0) {
       logger.info(`Cleaned up ${oldTasks.length} old tasks`);
     }
@@ -797,40 +1141,48 @@ app.listen(PORT, async () => {
   logger.info(`Agent ID: ${AGENT_ID}`);
   logger.info(`Cluster: ${CLUSTER_NAME}`);
   logger.info(`WebSocket server running on port ${wsPort}`);
-  
+
   await initializeServices();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   logger.info('Shutting down Edge Agent Service...');
-  
+
   // Update agent status to inactive
   const agent = AgentManager['clusterState'].agents.get(AGENT_ID);
   if (agent) {
     agent.status = 'inactive';
-    await redis.hset(`cluster:${CLUSTER_NAME}:agents`, AGENT_ID, JSON.stringify(agent));
+    await redis.hset(
+      `cluster:${CLUSTER_NAME}:agents`,
+      AGENT_ID,
+      JSON.stringify(agent),
+    );
   }
-  
+
   wss.close();
   await redis.disconnect();
-  
+
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   logger.info('Shutting down Edge Agent Service...');
-  
+
   // Update agent status to inactive
   const agent = AgentManager['clusterState'].agents.get(AGENT_ID);
   if (agent) {
     agent.status = 'inactive';
-    await redis.hset(`cluster:${CLUSTER_NAME}:agents`, AGENT_ID, JSON.stringify(agent));
+    await redis.hset(
+      `cluster:${CLUSTER_NAME}:agents`,
+      AGENT_ID,
+      JSON.stringify(agent),
+    );
   }
-  
+
   wss.close();
   await redis.disconnect();
-  
+
   process.exit(0);
 });
 

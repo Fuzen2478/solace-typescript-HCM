@@ -460,6 +460,210 @@ app.get('/analytics', (req, res) => {
   res.json(analytics);
 });
 
+// Real-time skill matching
+app.post('/match/skills', async (req, res) => {
+  try {
+    const { requiredSkills, urgency = 'medium', maxBudget } = req.body;
+    
+    if (!requiredSkills || !Array.isArray(requiredSkills)) {
+      return res.status(400).json({ error: 'Required skills array is mandatory' });
+    }
+    
+    const matchResults = [];
+    
+    for (const provider of OUTSOURCING_PROVIDERS) {
+      const skillMatch = requiredSkills.filter(skill => 
+        provider.skills.some(providerSkill => 
+          providerSkill.toLowerCase().includes(skill.toLowerCase())
+        )
+      );
+      
+      if (skillMatch.length > 0) {
+        const matchPercentage = (skillMatch.length / requiredSkills.length) * 100;
+        const availabilityScore = provider.availability === 'high' ? 100 : 
+                                provider.availability === 'medium' ? 70 : 30;
+        const ratingScore = (provider.rating / 5) * 100;
+        
+        let budgetScore = 100;
+        if (maxBudget) {
+          const avgRate = (provider.hourlyRate.min + provider.hourlyRate.max) / 2;
+          budgetScore = maxBudget >= avgRate ? 100 : (maxBudget / avgRate) * 100;
+        }
+        
+        const overallScore = (matchPercentage * 0.4) + (availabilityScore * 0.3) + 
+                           (ratingScore * 0.2) + (budgetScore * 0.1);
+        
+        matchResults.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          skillMatch: skillMatch,
+          matchPercentage: Math.round(matchPercentage),
+          overallScore: Math.round(overallScore),
+          estimatedRate: `${provider.hourlyRate.min}-${provider.hourlyRate.max}/hr`,
+          availability: provider.availability,
+          rating: provider.rating
+        });
+      }
+    }
+    
+    // Sort by overall score
+    matchResults.sort((a, b) => b.overallScore - a.overallScore);
+    
+    res.json({
+      requiredSkills,
+      urgency,
+      totalMatches: matchResults.length,
+      matches: matchResults,
+      recommendedAction: matchResults.length > 0 ? 
+        'Submit request to top-ranked providers' : 
+        'Consider expanding skill requirements or budget',
+      timestamp: new Date()
+    });
+    
+  } catch (error) {
+    logger.error('Error in skill matching:', error);
+    res.status(500).json({ error: 'Failed to perform skill matching' });
+  }
+});
+
+// Provider performance monitoring
+app.get('/providers/:providerId/performance', (req, res) => {
+  const { providerId } = req.params;
+  const { timeRange = '30d' } = req.query;
+  
+  const provider = OUTSOURCING_PROVIDERS.find(p => p.id === providerId);
+  if (!provider) {
+    return res.status(404).json({ error: 'Provider not found' });
+  }
+  
+  // Mock performance data
+  const performance = {
+    providerId,
+    providerName: provider.name,
+    timeRange,
+    metrics: {
+      totalProjects: Math.floor(Math.random() * 20) + 5,
+      completedProjects: Math.floor(Math.random() * 18) + 4,
+      avgDeliveryTime: `${Math.floor(Math.random() * 10) + 5} days`,
+      qualityScore: Math.round((4 + Math.random()) * 20) / 20,
+      clientSatisfaction: Math.round((4 + Math.random()) * 20) / 20,
+      onTimeDelivery: Math.round((0.8 + Math.random() * 0.2) * 100),
+      budgetAdherence: Math.round((0.85 + Math.random() * 0.15) * 100),
+      communicationScore: Math.round((4 + Math.random()) * 20) / 20
+    },
+    trends: {
+      deliveryTime: Math.random() > 0.5 ? 'improving' : 'stable',
+      qualityScore: Math.random() > 0.7 ? 'improving' : 'stable',
+      costEfficiency: Math.random() > 0.6 ? 'improving' : 'stable'
+    },
+    strengths: [
+      'Excellent technical skills',
+      'Reliable delivery',
+      'Good communication'
+    ],
+    areasForImprovement: [
+      'Could improve documentation',
+      'Sometimes needs more detailed requirements'
+    ]
+  };
+  
+  res.json(performance);
+});
+
+// Bulk request processing
+app.post('/requests/bulk', async (req, res) => {
+  try {
+    const { requests } = req.body;
+    
+    if (!Array.isArray(requests) || requests.length === 0) {
+      return res.status(400).json({ error: 'Requests array is required' });
+    }
+    
+    const results = [];
+    
+    for (const request of requests) {
+      try {
+        const outsourcingRequest: OutsourcingRequest = {
+          id: uuidv4(),
+          createdAt: new Date(),
+          remoteAllowed: true,
+          priority: 'medium',
+          ...request
+        };
+        
+        const proposals = await OutsourcingMatchingEngine.findBestProviders(outsourcingRequest);
+        
+        results.push({
+          requestId: outsourcingRequest.id,
+          originalRequest: request,
+          proposals: proposals.slice(0, 3), // Top 3 proposals
+          status: 'processed',
+          bestMatch: proposals[0] || null
+        });
+        
+      } catch (error: any) {
+        results.push({
+          requestId: uuidv4(),
+          originalRequest: request,
+          proposals: [],
+          status: 'failed',
+          error: error.message,
+          bestMatch: null
+        });
+      }
+    }
+    
+    const successfulRequests = results.filter(r => r.status === 'processed');
+    const failedRequests = results.filter(r => r.status === 'failed');
+    
+    res.json({
+      totalRequests: requests.length,
+      successfulRequests: successfulRequests.length,
+      failedRequests: failedRequests.length,
+      results,
+      summary: {
+        averageProposalsPerRequest: successfulRequests.length > 0 ? 
+          successfulRequests.reduce((sum, r) => sum + r.proposals.length, 0) / successfulRequests.length : 0,
+        topProviders: ['FreelancerPro', 'TechExperts', 'GlobalTalent']
+      },
+      timestamp: new Date()
+    });
+    
+  } catch (error) {
+    logger.error('Error processing bulk requests:', error);
+    res.status(500).json({ error: 'Failed to process bulk requests' });
+  }
+});
+
+// Market insights
+app.get('/market/insights', (req, res) => {
+  const { skill, region = 'global' } = req.query;
+  
+  // Mock market data
+  const insights = {
+    skill,
+    region,
+    marketData: {
+      averageRate: `${Math.floor(Math.random() * 50) + 30}/hr`,
+      demandLevel: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)],
+      supplyLevel: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)],
+      growthTrend: Math.random() > 0.5 ? 'increasing' : 'stable',
+      competitionLevel: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)]
+    },
+    recommendations: [
+      'Consider posting during peak hours (9 AM - 5 PM UTC)',
+      'Include detailed project requirements for better matches',
+      'Budget 10-15% above average for premium talent'
+    ],
+    relatedSkills: [
+      'React', 'TypeScript', 'Node.js', 'GraphQL', 'MongoDB'
+    ].filter(s => s.toLowerCase() !== skill?.toLowerCase()),
+    timestamp: new Date()
+  };
+  
+  res.json(insights);
+});
+
 // Start server
 const PORT = process.env.OUTSOURCING_SERVICE_PORT || 3006;
 app.listen(PORT, () => {

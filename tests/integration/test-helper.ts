@@ -1,1 +1,185 @@
-import axios from 'axios';\nimport WebSocket from 'ws';\nimport { expect } from '@jest/globals';\n\n// Test configuration\nexport const TEST_CONFIG = {\n  services: {\n    gateway: {\n      url: process.env.TEST_GATEWAY_URL || 'http://localhost:3000',\n      ws: process.env.TEST_GATEWAY_WS || 'ws://localhost:3006'\n    },\n    hr: {\n      url: process.env.TEST_HR_URL || 'http://localhost:3001'\n    },\n    matching: {\n      url: process.env.TEST_MATCHING_URL || 'http://localhost:3002'\n    },\n    edge: {\n      url: process.env.TEST_EDGE_URL || 'http://localhost:3004'\n    }\n  },\n  timeouts: {\n    api: 10000,\n    workflow: 30000,\n    websocket: 5000\n  },\n  retries: {\n    healthCheck: 5,\n    workflow: 3\n  }\n};\n\n// Test utilities\nexport class TestHelper {\n  static async waitForServices(services: string[] = ['gateway', 'hr', 'matching', 'edge']): Promise<void> {\n    const maxRetries = TEST_CONFIG.retries.healthCheck;\n    const delay = 2000;\n\n    for (const service of services) {\n      const serviceUrl = TEST_CONFIG.services[service as keyof typeof TEST_CONFIG.services].url;\n      let retries = 0;\n      let healthy = false;\n\n      while (retries < maxRetries && !healthy) {\n        try {\n          const response = await axios.get(`${serviceUrl}/health`, {\n            timeout: TEST_CONFIG.timeouts.api\n          });\n          \n          if (response.status === 200) {\n            healthy = true;\n            console.log(`✅ ${service} service is healthy`);\n          }\n        } catch (error) {\n          retries++;\n          console.log(`⏳ Waiting for ${service} service... (${retries}/${maxRetries})`);\n          \n          if (retries < maxRetries) {\n            await this.sleep(delay);\n          }\n        }\n      }\n\n      if (!healthy) {\n        throw new Error(`❌ ${service} service failed to become healthy after ${maxRetries} retries`);\n      }\n    }\n  }\n\n  static async sleep(ms: number): Promise<void> {\n    return new Promise(resolve => setTimeout(resolve, ms));\n  }\n\n  static async createTestEmployee(employeeData?: Partial<any>): Promise<any> {\n    const defaultEmployee = {\n      name: `Test Employee ${Date.now()}`,\n      email: `test${Date.now()}@company.com`,\n      department: 'Engineering',\n      location: 'Seoul',\n      role: 'Software Engineer',\n      skills: [\n        { name: 'JavaScript', level: 'advanced', yearsOfExperience: 3 },\n        { name: 'Python', level: 'intermediate', yearsOfExperience: 2 },\n        { name: 'React', level: 'expert', yearsOfExperience: 4 }\n      ],\n      availability: {\n        available: true,\n        capacity: 80,\n        scheduledHours: 20,\n        maxHoursPerWeek: 40\n      },\n      contactInfo: {\n        phone: '+82-10-1234-5678',\n        address: 'Seoul, South Korea'\n      },\n      emergencyContact: {\n        name: 'Emergency Contact',\n        relationship: 'Spouse',\n        phone: '+82-10-8765-4321'\n      }\n    };\n\n    const employee = { ...defaultEmployee, ...employeeData };\n    \n    const response = await axios.post(\n      `${TEST_CONFIG.services.gateway.url}/api/hr/employees`,\n      employee,\n      { timeout: TEST_CONFIG.timeouts.api }\n    );\n\n    return response.data;\n  }\n\n  static async createTestTask(taskData?: Partial<any>): Promise<any> {\n    const defaultTask = {\n      title: `Test Task ${Date.now()}`,\n      description: 'Automated test task for integration testing',\n      requiredSkills: [\n        { name: 'JavaScript', level: 'intermediate', mandatory: true, weight: 8 },\n        { name: 'React', level: 'advanced', mandatory: false, weight: 6 }\n      ],\n      priority: 'medium',\n      estimatedHours: 8,\n      deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now\n      location: 'Seoul',\n      remoteAllowed: true,\n      budget: 500000\n    };\n\n    const task = { ...defaultTask, ...taskData };\n    \n    const response = await axios.post(\n      `${TEST_CONFIG.services.gateway.url}/api/matching/tasks`,\n      task,\n      { timeout: TEST_CONFIG.timeouts.api }\n    );\n\n    return response.data;\n  }\n\n  static async waitForTaskCompletion(taskId: string, maxWaitTime = 30000): Promise<any> {\n    const startTime = Date.now();\n    const pollInterval = 1000;\n\n    while (Date.now() - startTime < maxWaitTime) {\n      try {\n        const response = await axios.get(\n          `${TEST_CONFIG.services.gateway.url}/api/matching/tasks/${taskId}`,\n          { timeout: TEST_CONFIG.timeouts.api }\n        );\n\n        const task = response.data;\n        if (task.status === 'completed' || task.status === 'failed') {\n          return task;\n        }\n\n        await this.sleep(pollInterval);\n      } catch (error) {\n        console.warn(`Error polling task ${taskId}:`, error.message);\n        await this.sleep(pollInterval);\n      }\n    }\n\n    throw new Error(`Task ${taskId} did not complete within ${maxWaitTime}ms`);\n  }\n\n  static async connectWebSocket(url: string): Promise<WebSocket> {\n    return new Promise((resolve, reject) => {\n      const ws = new WebSocket(url);\n      \n      const timeout = setTimeout(() => {\n        reject(new Error(`WebSocket connection timeout to ${url}`));\n      }, TEST_CONFIG.timeouts.websocket);\n\n      ws.on('open', () => {\n        clearTimeout(timeout);\n        resolve(ws);\n      });\n\n      ws.on('error', (error) => {\n        clearTimeout(timeout);\n        reject(error);\n      });\n    });\n  }\n\n  static async cleanupTestData(): Promise<void> {\n    // Clean up test employees and tasks\n    // This would typically involve calling cleanup endpoints\n    // For now, we'll log the cleanup action\n    console.log('🧹 Cleaning up test data...');\n    \n    try {\n      // Reset edge agent state if needed\n      await axios.post(\n        `${TEST_CONFIG.services.edge.url}/reset`,\n        {},\n        { timeout: TEST_CONFIG.timeouts.api }\n      ).catch(() => {}); // Ignore errors\n      \n    } catch (error) {\n      console.warn('Cleanup warning:', error.message);\n    }\n  }\n\n  static async validateServiceHealth(): Promise<{ [key: string]: boolean }> {\n    const healthStatus: { [key: string]: boolean } = {};\n\n    for (const [serviceName, config] of Object.entries(TEST_CONFIG.services)) {\n      try {\n        const response = await axios.get(`${config.url}/health`, {\n          timeout: TEST_CONFIG.timeouts.api\n        });\n        healthStatus[serviceName] = response.status === 200;\n      } catch (error) {\n        healthStatus[serviceName] = false;\n      }\n    }\n\n    return healthStatus;\n  }\n\n  static expectValidEmployee(employee: any): void {\n    expect(employee).toMatchObject({\n      id: expect.any(String),\n      name: expect.any(String),\n      email: expect.any(String),\n      department: expect.any(String),\n      skills: expect.any(Array),\n      availability: expect.any(Object),\n      createdAt: expect.any(String),\n      updatedAt: expect.any(String)\n    });\n\n    expect(employee.skills.length).toBeGreaterThan(0);\n    expect(employee.availability).toHaveProperty('available');\n    expect(employee.availability).toHaveProperty('capacity');\n  }\n\n  static expectValidTask(task: any): void {\n    expect(task).toMatchObject({\n      id: expect.any(String),\n      title: expect.any(String),\n      description: expect.any(String),\n      requiredSkills: expect.any(Array),\n      priority: expect.stringMatching(/^(low|medium|high|critical)$/),\n      status: expect.stringMatching(/^(pending|assigned|in_progress|completed|failed)$/),\n      estimatedHours: expect.any(Number),\n      createdAt: expect.any(String)\n    });\n\n    expect(task.requiredSkills.length).toBeGreaterThan(0);\n    expect(task.estimatedHours).toBeGreaterThan(0);\n  }\n\n  static expectValidMatchingResult(result: any): void {\n    expect(result).toHaveProperty('taskId');\n    expect(result).toHaveProperty('matches');\n    expect(Array.isArray(result.matches)).toBe(true);\n\n    if (result.matches.length > 0) {\n      const match = result.matches[0];\n      expect(match).toMatchObject({\n        employeeId: expect.any(String),\n        score: expect.any(Number),\n        confidence: expect.any(Number),\n        reasons: expect.any(Array)\n      });\n\n      expect(match.score).toBeGreaterThanOrEqual(0);\n      expect(match.score).toBeLessThanOrEqual(100);\n      expect(match.confidence).toBeGreaterThanOrEqual(0);\n      expect(match.confidence).toBeLessThanOrEqual(1);\n    }\n  }\n}\n\n// Jest setup and teardown\nexport const setupIntegrationTests = () => {\n  beforeAll(async () => {\n    console.log('🚀 Setting up integration tests...');\n    await TestHelper.waitForServices();\n    console.log('✅ All services are ready');\n  }, 60000);\n\n  afterAll(async () => {\n    console.log('🧹 Cleaning up after tests...');\n    await TestHelper.cleanupTestData();\n    console.log('✅ Cleanup completed');\n  }, 30000);\n};\n\nexport default TestHelper;
+import axios from 'axios';
+import WebSocket from 'ws';
+
+// ✅ Jest의 expect, test, describe, beforeAll 등은 전역으로 사용 가능하므로 import 불필요
+
+// Test configuration
+export const TEST_CONFIG = {
+  services: {
+    gateway: {
+      url: 'http://localhost:3000',
+      ws: 'ws://localhost:3006',
+    },
+    hr: {
+      url: process.env.TEST_HR_URL || 'http://localhost:3001',
+    },
+    matching: {
+      url: process.env.TEST_MATCHING_URL || 'http://localhost:3002',
+    },
+    edge: {
+      url: process.env.TEST_EDGE_URL || 'http://localhost:3004',
+    },
+  },
+  timeouts: {
+    api: 10000,
+    workflow: 30000,
+    websocket: 5000,
+  },
+  retries: {
+    healthCheck: 5,
+    workflow: 3,
+  },
+};
+
+// Test utilities
+export class TestHelper {
+  static async validateServiceHealth(): Promise<{ [key: string]: boolean }> {
+    const healthStatus: { [key: string]: boolean } = {};
+
+    for (const [serviceName, config] of Object.entries(TEST_CONFIG.services)) {
+      try {
+        const response = await axios.get(`${config.url}/health`, {
+          timeout: TEST_CONFIG.timeouts.api,
+        });
+        healthStatus[serviceName] = response.status === 200;
+      } catch (error) {
+        healthStatus[serviceName] = false;
+      }
+    }
+
+    return healthStatus;
+  }
+  static async waitForServices(
+    services: string[] = ['gateway', 'hr', 'matching', 'edge'],
+  ): Promise<void> {
+    const maxRetries = TEST_CONFIG.retries.healthCheck;
+    const delay = 2000;
+
+    for (const service of services) {
+      const serviceUrl =
+        TEST_CONFIG.services[service as keyof typeof TEST_CONFIG.services].url;
+      let retries = 0;
+      let healthy = false;
+
+      while (retries < maxRetries && !healthy) {
+        try {
+          const response = await axios.get(`${serviceUrl}/health`, {
+            timeout: TEST_CONFIG.timeouts.api,
+          });
+
+          if (response.status === 200) {
+            healthy = true;
+            console.log(`✅ ${service} service is healthy`);
+          }
+        } catch {
+          retries++;
+          console.log(
+            `⏳ Waiting for ${service} service... (${retries}/${maxRetries})`,
+          );
+          if (retries < maxRetries) {
+            await this.sleep(delay);
+          }
+        }
+      }
+
+      if (!healthy) {
+        throw new Error(
+          `❌ ${service} service failed to become healthy after ${maxRetries} retries`,
+        );
+      }
+    }
+  }
+
+  static sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  static async createTestEmployee(employeeData?: Partial<any>): Promise<any> {
+    const defaultEmployee = {
+      name: `Test Employee ${Date.now()}`,
+      email: `test${Date.now()}@company.com`,
+      department: 'Engineering',
+      location: 'Seoul',
+      role: 'Software Engineer',
+      skills: [
+        { name: 'JavaScript', level: 'advanced', yearsOfExperience: 3 },
+        { name: 'Python', level: 'intermediate', yearsOfExperience: 2 },
+        { name: 'React', level: 'expert', yearsOfExperience: 4 },
+      ],
+      availability: {
+        available: true,
+        capacity: 80,
+        scheduledHours: 20,
+        maxHoursPerWeek: 40,
+      },
+      contactInfo: {
+        phone: '+82-10-1234-5678',
+        address: 'Seoul, South Korea',
+      },
+      emergencyContact: {
+        name: 'Emergency Contact',
+        relationship: 'Spouse',
+        phone: '+82-10-8765-4321',
+      },
+    };
+
+    const employee = { ...defaultEmployee, ...employeeData };
+    const response = await axios.post(
+      `${TEST_CONFIG.services.gateway.url}/api/hr/employees`,
+      employee,
+      { timeout: TEST_CONFIG.timeouts.api },
+    );
+    return response.data;
+  }
+
+  static async cleanupTestData(): Promise<void> {
+    console.log('🧹 Cleaning up test data...');
+    try {
+      await axios
+        .post(
+          `${TEST_CONFIG.services.edge.url}/reset`,
+          {},
+          {
+            timeout: TEST_CONFIG.timeouts.api,
+          },
+        )
+        .catch(() => {});
+    } catch (error: any) {
+      console.warn('Cleanup warning:', error.message);
+    }
+  }
+
+  static expectValidEmployee(employee: any): void {
+    expect(employee).toMatchObject({
+      id: expect.any(String),
+      name: expect.any(String),
+      email: expect.any(String),
+      department: expect.any(String),
+      skills: expect.any(Array),
+      availability: expect.any(Object),
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+
+    expect(employee.skills.length).toBeGreaterThan(0);
+    expect(employee.availability).toHaveProperty('available');
+    expect(employee.availability).toHaveProperty('capacity');
+  }
+}
+
+// Jest setup and teardown
+export const setupIntegrationTests = () => {
+  beforeAll(async () => {
+    console.log('🚀 Setting up integration tests...');
+    await TestHelper.waitForServices();
+    console.log('✅ All services are ready');
+  }, 60000);
+
+  afterAll(async () => {
+    console.log('🧹 Cleaning up after tests...');
+    await TestHelper.cleanupTestData();
+    console.log('✅ Cleanup completed');
+  }, 30000);
+};
+
+export default TestHelper;
